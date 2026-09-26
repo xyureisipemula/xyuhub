@@ -1,0 +1,4388 @@
+--!nocheck
+-- ui-template.lua  --  the XYUREI X-FLOID panel, v3
+--
+--   local UI   = loadstring(readfile("ui-template.lua"))()
+--   local win  = UI.Window({ title = "SPEED", accentTitle = "MONKEY", subtitle = "seltonmt" })
+--   local page = win:Page("FARM", UI.icon.bolt)
+--   local card = page:Card("LOOP", 1)      -- 1 = left, 2 = right, 0 = full width
+--   card:Toggle("Auto", CONFIG.auto, function(v) CONFIG.auto = v end, "hint")
+--   local refresh = card:Stepper("Stage", getText, onStep)   -- returns a refresher
+--   card:Slider("Rate", 2, 40, 12, function(v) ... end)
+--   card:Dropdown("Mode", { "Fast", "Safe" }, "Fast", function(v) ... end)
+--   card:Button("Unstuck", function() ... end, UI.theme.bad)
+--   local out = card:Readout(12); out:set({ "STATUS", "  income 47.3K/s" })
+--   win:SetStatus("213K wins   lvl 241   world 2")     -- the live status line
+--
+-- THE PUBLIC API IS UNCHANGED FROM v1 AND v2. Nineteen game scripts call it and
+-- not one of them was touched for this redesign: UI.Window, win:Page/Refresh/
+-- SetStatus/Destroy, page:Card, card:Toggle/Stepper/Slider/Dropdown/Button/
+-- Label/Readout, and every UI.theme.* / UI.icon.* / UI.font.* key.
+--
+-- What changed is the whole look, from the XYUREI X-FLOID mockup:
+--
+--   * 820x582 instead of 920x580, radius 13. It reads as a tool, not a window.
+--   * The 240px sidebar is gone. Navigation is a 46px ICON RAIL - the pages had
+--     names AND icons before and the names were dead weight; the page name now
+--     lives once, in the header, where you are already looking.
+--   * A tinted STATUS STRIP under the header carries the master toggle and three
+--     numbers. That is what you glance at while playing, so it sits above the
+--     controls rather than inside them.
+--   * Cards became BLOCKS: a bordered box with a header band (icon, mono caps
+--     label, "3 / 3 an") and hairline-separated rows. The band is what makes a
+--     group readable without the card needing a drop shadow.
+--   * A DISCORD BAR is pinned above the footer. It is the only outbound link and
+--     it is always visible.
+--   * Palette is flat violet on near-black - #8b5cf6 on #0d0a14 - and the accent
+--     is a single colour, not the v2 violet->cyan ramp. The ramp fought every
+--     screenshot and made the good/warn/bad tones harder to read.
+--
+-- Roblox has no inline SVG, so the mockup's stroked icons stay single glyphs
+-- (UI.icon). Sora/IBM Plex Mono do not exist either: GothamBold stands in for
+-- headings, Gotham for body, Code for every number and mono label.
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
+local HttpService = game:GetService("HttpService")
+
+local plr = Players.LocalPlayer
+
+-- Where a ScreenGui is PARENTED decides whether the game can find it, and the
+-- three containers are not equally safe. Measured in BloxStrike from a thread set
+-- to identity 2 (what a normal LocalScript runs as): `game:GetService("CoreGui")`
+-- comes back NIL, so a panel in there cannot be walked onto - while
+-- `PlayerGui:GetChildren()` answers normally and lists every child by name. The
+-- old order was CoreGui first and PlayerGui as the fallback, which is right up
+-- until the executor refuses CoreGui: the panel then lands in the one container
+-- every client script can read, under a name that says exactly what it is.
+--
+-- So: gethui() first (not in the DataModel at all), CoreGui second, and if it
+-- really has to be PlayerGui the name is randomised - a panel that is visible is
+-- one thing, a panel that is visible AND identifies the script is another.
+--
+-- And a panel that ends up in PlayerGui has been RENAMED, so nothing can find it
+-- by name afterwards - not the next run's sweep, not a person reading the tree.
+-- Measured 2026-09-06 in +1 Cut Grass Adventure: the window was on screen as
+-- `PlayerGui._215795` while a sweep for "CutGrassPanel" reported none, which is
+-- exactly how a re-execute ends up with two panels stacked. So hostGui registers
+-- every panel under the name the SCRIPT asked for, in the shared global table
+-- rather than as an attribute on the instance - an attribute is a fixed string
+-- sitting on the object and would hand back the identification the random name
+-- exists to avoid.
+local GENV = (getgenv and getgenv()) or _G
+GENV.__SEL_PANELS = GENV.__SEL_PANELS or {}
+
+local function hostGui(gui)
+	local wanted = gui.Name
+	pcall(function() gui.Parent = gethui and gethui() end)
+	if not gui.Parent then
+		pcall(function() gui.Parent = game:GetService("CoreGui") end)
+	end
+	if not gui.Parent then
+		gui.Name = "_" .. tostring(math.random(100000, 999999))
+		gui.Parent = plr:WaitForChild("PlayerGui")
+	end
+	GENV.__SEL_PANELS[wanted] = gui
+	return gui
+end
+
+local UI = {}
+
+-- 3.8: the universal panel's strings entered the dictionaries. The version is
+-- part of the i18n cache filename, so without this bump every client that has
+-- ever opened a panel keeps its old copy and the new controls come up untranslated.
+-- 3.10: the Hypershot panel's strings. 3.11: its WORLD / MISC / GUN additions.
+-- 3.12: Steal An Egg's offline money / rift switches.
+-- 3.15: the report card's category, confirmation popup and validation strings.
+UI.VERSION = "3.15"
+UI.BRAND = "XYUREI X-FLOID"
+UI.DISCORD = "discord.gg/ARdpzFuKMm"
+UI.REPO = "seltonmt012/sel01-rbx"
+
+-- Every script sweeps its own leftover panel before rebuilding, and every one of
+-- them used to spell the container list out as a literal:
+--
+--     for _, root in ipairs({ (gethui and gethui()) or nil,
+--                             game:GetService("CoreGui"),
+--                             plr:FindFirstChild("PlayerGui") }) do
+--
+-- Two separate things are wrong with that line and both were measured.
+--
+-- 1. `game:GetService("CoreGui")` does not always come back nil when the
+--    executor will not hand it over - on VOLT it THROWS: "The current thread
+--    cannot access 'CoreGui' (lacking capability Plugin)". Inside a table
+--    constructor that error is not caught by anything, so the script dies right
+--    there, before the panel exists. Reported from the wild 2026-09-06 on
+--    +1 Cut Grass Adventure; it was never a cutgrass bug, every script had it.
+-- 2. A nil first element leaves a HOLE and `ipairs` stops at it, so on an
+--    executor without gethui the sweep silently did nothing at all.
+--
+-- UI.roots() has neither failure mode: everything is pcall'd and the list is
+-- built by APPENDING, so it is always a dense array of real containers - and it
+-- is the same order hostGui() parents into, which is what makes the sweep find
+-- what the last run left behind.
+function UI.roots()
+	local out = {}
+	local ok, r = pcall(function() return gethui and gethui() end)
+	if ok and typeof(r) == "Instance" then out[#out + 1] = r end
+	ok, r = pcall(game.GetService, game, "CoreGui")
+	if ok and typeof(r) == "Instance" then out[#out + 1] = r end
+	ok, r = pcall(function() return plr and plr:FindFirstChildOfClass("PlayerGui") end)
+	if ok and typeof(r) == "Instance" then out[#out + 1] = r end
+	return out
+end
+
+-- Destroy every ScreenGui called `name` in all three containers. `name` may also
+-- be a list of names - a script that has been renamed still cleans up after its
+-- older self. Returns how many were removed.
+function UI.sweep(name)
+	local names = type(name) == "table" and name or { name }
+	local n = 0
+	-- The registry first, because it is the only thing that finds a panel which
+	-- fell through to PlayerGui: that one was renamed and there is nothing left
+	-- in the tree to match on.
+	for _, want in ipairs(names) do
+		local prev = GENV.__SEL_PANELS[want]
+		if prev then
+			if pcall(function() prev:Destroy() end) then n = n + 1 end
+			GENV.__SEL_PANELS[want] = nil
+		end
+	end
+	for _, root in ipairs(UI.roots()) do
+		local ok, kids = pcall(root.GetChildren, root)
+		if ok then
+			for _, g in ipairs(kids) do
+				for _, want in ipairs(names) do
+					if g.Name == want then
+						if pcall(function() g:Destroy() end) then n = n + 1 end
+						break
+					end
+				end
+			end
+		end
+	end
+	return n
+end
+
+-- Where a "this is broken" report goes. EMPTY means the panel falls back to the
+-- clipboard, which needs no infrastructure at all - so the button works from day
+-- one and switching to the relay later is this one line, not a re-push of every
+-- script.
+--
+-- It must NOT be a Discord webhook. These scripts are public on GitHub, webhook
+-- URLs are scraped out of public repos by bots, and a webhook lets whoever finds
+-- it post arbitrary content - images, links, @everyone - straight into the
+-- channel. The only cure would be deleting the webhook and republishing all 21
+-- scripts. A small relay in front of it does not hide the URL (nothing can) but
+-- it turns the open letterbox into a form: it accepts a fixed set of fields,
+-- writes the Discord message itself, rate-limits per IP, and can be changed in
+-- one place in seconds without touching a single script.
+UI.REPORT_URL = "https://XYUREI X-FLOID-report.XYUREI X-FLOID.workers.dev"
+
+-- Palette ---------------------------------------------------------------------
+-- Four depths, not five. v2 had void/rail/sidebar/window/header/subBar/card and
+-- the difference between several of them was invisible on a real screen; this
+-- keeps only the steps that actually separate something.
+UI.theme = {
+	void = Color3.fromHex("07050d"),
+	rail = Color3.fromHex("0b0812"),
+	sidebar = Color3.fromHex("0b0812"),   -- kept: v1 scripts may read it
+	window = Color3.fromHex("0d0a14"),
+	header = Color3.fromHex("0d0a14"),
+	subBar = Color3.fromHex("120e1c"),
+	card = Color3.fromHex("0f0c17"),
+	cardHover = Color3.fromHex("141020"),
+	input = Color3.fromHex("131020"),
+	backdrop = Color3.fromHex("07050d"),
+
+	band = Color3.fromHex("241f33"),      -- block border
+	line = Color3.fromHex("1d182b"),      -- hairline between rows
+	edge = Color3.fromHex("221c33"),      -- window border
+
+	-- one accent, no ramp
+	accent = Color3.fromHex("8b5cf6"),
+	accentAlt = Color3.fromHex("a78bfa"),  -- kept for v1 callers; now just the hover
+	accentHover = Color3.fromHex("a78bfa"),
+	accentSoft = Color3.fromHex("c4b5fd"),
+
+	discord = Color3.fromHex("5865f2"),
+	discordAlt = Color3.fromHex("4650e0"),
+
+	good = Color3.fromHex("5eead4"),
+	warn = Color3.fromHex("fbbf24"),
+	bad = Color3.fromHex("fb7185"),
+
+	text = Color3.fromHex("efedf7"),
+	textSoft = Color3.fromHex("e8e6f0"),
+	muted = Color3.fromHex("a49cba"),
+	dim = Color3.fromHex("8b839f"),
+	dimmer = Color3.fromHex("6f6885"),
+	faint = Color3.fromHex("5e5877"),
+	fainter = Color3.fromHex("4b4468"),
+
+	lineAlpha = 0.9,
+	dimAlpha = 0.5,
+	fainterAlpha = 0.7,
+}
+
+UI.font = {
+	heading = Enum.Font.GothamBold,
+	body = Enum.Font.Gotham,
+	mono = Enum.Font.Code,
+}
+
+-- Every key from v1/v2 is still here; scripts index these by name and a missing
+-- one would silently draw nothing.
+--
+-- EVERY GLYPH BELOW WAS RENDERED IN-GAME AND READ OFF A SCREENSHOT. Roblox's
+-- Gotham does not have the whole Unicode symbol range and a missing glyph draws
+-- as a tofu box, not as nothing - so v2's ⊞ ⌂ ⌕ ▾ ▣ ◷ ✦ ✧ ❉ ↻ ◍ ≡ all showed up
+-- as ▯ in the panel. Verified working: ★ ☆ ◆ ◇ ● ○ ■ □ ▲ ▼ ⚡ ⚙ ▤ ▦ ↑ ↓ → ← ≈ ∞
+-- ◉ ◎ ◊ ◈ ⛏ • ◦. Emoji render too, but in full colour, which fights a monochrome
+-- rail - so they are not used. Duplicates below are deliberate: a repeated shape
+-- beats a box.
+UI.icon = {
+	sliders = "▤", eye = "◉", target = "◎", shield = "◇",
+	bolt = "⚡", gear = "⚙", list = "▤", chart = "▦",
+	sword = "◆", coin = "●", flask = "◊", map = "◈",
+	pickaxe = "⛏", bag = "■", clock = "○", flame = "◆",
+	star = "★", wave = "≈", grid = "▦", spark = "★",
+	home = "▲", loop = "→", up = "↑", info = "○",
+	wrench = "⚒",
+}
+
+-- ...and the real thing. The glyphs above are only the fallback now: a stroked
+-- PNG set is rendered by tools/brand-render.py out of tools/brand/icons.html and
+-- mirrored into the workspace, where getcustomasset() can reach it. A house that
+-- looks like a house beats a filled circle standing in for one.
+--
+-- The map is keyed by the GLYPH because that is what scripts pass around
+-- (page:Card / win:Page take UI.icon.bolt, a string). Several keys share a
+-- glyph, so they share a file - deliberate, and better than a mismatch.
+UI.iconFile = {
+	["▲"] = "home", ["⚡"] = "bolt", ["○"] = "clock", ["▦"] = "chart",
+	["●"] = "coin", ["★"] = "star", ["⚙"] = "gear", ["→"] = "loop",
+	["▤"] = "list", ["■"] = "bag", ["◇"] = "shield", ["◆"] = "sword",
+	["⛏"] = "pickaxe", ["◊"] = "flask", ["◈"] = "map",
+	-- The eye and the crosshair used to point at shield.png, so ESP, AIM and
+	-- HUMANISER all drew the same picture and the rail told you nothing. The
+	-- recoil page had no entry at all and fell through to the raw glyph.
+	["◉"] = "eye", ["◎"] = "target", ["≈"] = "wave", ["⚒"] = "wrench",
+}
+
+-- Real images, not glyphs ------------------------------------------------------
+--
+-- getcustomasset() turns a file sitting in the executor's workspace folder into
+-- an rbxassetid the UI can draw, with no upload to Roblox and no moderation
+-- wait. That is the whole trick for getting the actual logo - and any future
+-- icon set - into the panel instead of hunting for a Unicode character that
+-- Gotham happens to have.
+--
+-- bridge.py mirrors brand/XYUREI X-FLOID-mark.png into the workspace for exactly this.
+-- Everything is guarded: a missing file, an executor without the function, or a
+-- different name for it must fall back to the text glyph, never error.
+local imageCache = {}
+function UI.image(file)
+	if imageCache[file] ~= nil then return imageCache[file] or nil end
+	local resolver = getcustomasset or getsynasset or (syn and syn.getcustomasset)
+	local exists = isfile and isfile(file)
+	if not resolver or not exists then
+		imageCache[file] = false
+		return nil
+	end
+	local ok, id = pcall(resolver, file)
+	imageCache[file] = (ok and id) or false
+	return imageCache[file] or nil
+end
+
+-- Icons straight off a URL. ImageLabel.Image does NOT take a web address - it
+-- only ever accepts an rbxassetid - so the trick is to download the bytes, drop
+-- them in the workspace and hand THAT to getcustomasset. Once fetched the file
+-- stays, so it costs one request ever, and a dead link or an executor without
+-- writefile simply returns nil.
+--
+--   local id = UI.imageFromUrl("https://raw.githubusercontent.com/.../swords.png")
+--   if id then someImageLabel.Image = id end
+--
+-- The practical use: put a PNG in the sel01-rbx repo next to the scripts, and
+-- every panel can draw it without anybody uploading anything to Roblox.
+function UI.imageFromUrl(url, name)
+	name = name or ("XYUREI X-FLOID-cache/" .. (string.match(url, "([%w%-_%.]+)%.png$") or
+		tostring(#url)) .. ".png")
+	if isfile and isfile(name) then return UI.image(name) end
+	if not writefile then return nil end
+	local ok, body = pcall(function() return game:HttpGet(url) end)
+	if not ok or not body or #body < 8 then return nil end
+	-- Confirm it really is a PNG before caching it: an HTML error page written to
+	-- disk as .png would be cached forever and draw nothing.
+	if string.sub(body, 2, 4) ~= "PNG" then return nil end
+	local wrote = pcall(writefile, name, body)
+	if not wrote then return nil end
+	return UI.image(name)
+end
+
+UI.LOGO = "XYUREI X-FLOID-mark.png"
+
+-- Stopping the script, not just the window ---------------------------------------
+--
+-- Closing the panel used to destroy the ScreenGui and nothing else: every loop
+-- kept running, the character kept farming, and there was no way to stop it short
+-- of rejoining. Reported by a user as "not letting me close out script", and they
+-- were right - the button says close and only hid the evidence.
+--
+-- The stop is CONTENT-ADDRESSED, never guessed from the alias: `minemountain`
+-- keeps its state in `_G.__MINEMTN`, `cleanleaves` in `_G.__LEAVES_DBG`. Deriving
+-- a global from a name is the same trap as index-based name mapping. So this
+-- walks the globals for the debug table every script exposes - `__<NAME>_DBG`
+-- holding CONFIG and STATE - and works from what it finds:
+--
+--   * every boolean master switch in CONFIG goes false, so nothing restarts
+--   * the generation counter beside it (`__<NAME>`, the same name without _DBG)
+--     is bumped, which is exactly what every guarded loop in every script checks
+--
+-- Re-running the script starts a fresh generation and everything works again.
+function UI.stopScript()
+	local envs = { _G }
+	if getgenv then
+		local ok, shared = pcall(getgenv)
+		if ok and type(shared) == "table" and shared ~= _G then envs[#envs + 1] = shared end
+	end
+
+	local stopped = {}
+	for _, env in ipairs(envs) do
+		for key, value in pairs(env) do
+			if type(key) == "string" and type(value) == "table"
+				and string.match(key, "^__.+_DBG$") and type(value.CONFIG) == "table" then
+				for _, switch in ipairs({ "auto", "enabled", "run", "running", "master" }) do
+					if type(value.CONFIG[switch]) == "boolean" then
+						value.CONFIG[switch] = false
+					end
+				end
+				local counter = string.sub(key, 1, #key - 4)
+				if type(env[counter]) == "number" then
+					env[counter] = env[counter] + 1
+					stopped[#stopped + 1] = counter
+				end
+			end
+		end
+	end
+	if #stopped > 0 then
+		print("[XYUREI X-FLOID] stopped: " .. table.concat(stopped, ", ") ..
+			" - run the loader again to start it back up")
+	end
+	return #stopped
+end
+
+-- Open a link, for real ---------------------------------------------------------
+--
+-- "Copied to your clipboard" is not opening a link. It ends with the user
+-- alt-tabbing, opening a browser and pasting - which is exactly the friction the
+-- button existed to remove, and the reason the Discord bar felt broken.
+--
+-- There is no single function for this: every executor names it differently and
+-- Roblox's own one is not available everywhere. So try them in order of how
+-- directly they land on the page, and only fall back to the clipboard when none
+-- of them exists. The clipboard is written EITHER WAY - worst case the link is
+-- one paste away instead of lost.
+--
+-- Returns "browser" if something claimed to open it, "clipboard" if only the
+-- copy worked, and "none" if even that is missing.
+function UI.openUrl(url)
+	local env = (getgenv and getgenv()) or _G or {}
+	local copied = pcall(function()
+		(setclipboard or toclipboard or set_clipboard or env.setclipboard)(url)
+	end)
+
+	-- Executor-provided openers. Named differently in every one of them, so this
+	-- is a lookup rather than a call: whichever exists wins, none is assumed.
+	-- They open the SYSTEM browser, which is what people expect.
+	--
+	-- Built as an APPEND-ONLY list, never as a table literal with holes in it:
+	-- `{a, nil, c}` stops `ipairs` at the first missing entry, so on an executor
+	-- without the first function every later one would go untried.
+	local openers = {}
+	local function consider(fn)
+		if type(fn) == "function" then openers[#openers + 1] = fn end
+	end
+	for _, name in ipairs({ "openbrowser", "open_url", "openurl", "browse" }) do
+		consider(rawget(env, name))
+	end
+	consider(syn and syn.open_url)
+	consider(fluxus and fluxus.open_url)
+	for _, fn in ipairs(openers) do
+		if pcall(fn, url) then return "browser" end
+	end
+
+	-- Roblox's own. It exists on the desktop client and is missing on others, and
+	-- on at least one it BLOCKS until the overlay is dismissed - so it runs in its
+	-- own thread. A yielding call in a click handler freezes the panel, and inside
+	-- the bridge's poll loop it takes the whole session down.
+	local fired = false
+	local ok = pcall(function()
+		local gui = game:GetService("GuiService")
+		if type(gui.OpenBrowserWindow) == "function" then
+			fired = true
+			task.spawn(function() pcall(gui.OpenBrowserWindow, gui, url) end)
+		end
+	end)
+	if ok and fired then return "browser" end
+
+	return copied and "clipboard" or "none"
+end
+
+--------------------------------------------------------------------------------
+-- language
+--------------------------------------------------------------------------------
+-- Three languages, one dictionary, and NOT ONE LINE changed in any game script.
+--
+-- The trick is that every piece of text a panel shows already funnels through
+-- two places: label() when it is created and setText() when it changes. Both
+-- stamp the ORIGINAL string onto the instance as an attribute and display
+-- UI.t(original). Switching language therefore does not need to know where a
+-- string came from - it walks the ScreenGui, reads the attribute back and
+-- re-renders. A script that passes "Auto rebirth" keeps passing "Auto rebirth"
+-- forever; only the dictionary decides what the player reads.
+--
+-- Anything with no dictionary entry falls through unchanged, so a missing
+-- translation is a mixed panel, never a blank one.
+UI.LANGS = { "de", "en", "ru", "fil" }
+UI.LANG_NAME = { de = "Deutsch", en = "English", ru = "Russkij", fil = "Filipino" }
+UI.RAW = "https://raw.githubusercontent.com/" .. UI.REPO .. "/main/"
+
+local LANG_FILE = "XYUREI X-FLOID-lang.txt"
+local TEXT_ATTR = "SxText"
+local HINT_ATTR = "SxHint"
+
+-- The player's own Roblox language is the best default there is: a Russian
+-- client gets Russian without touching anything. A saved choice always wins.
+-- Locale ids that are not simply the first two letters of the language code.
+-- `fil` is three letters, Tagalog answers as `tl`, and cutting to two would turn
+-- Filipino into "fi" - which is FINNISH. A table beats string arithmetic here for
+-- the same reason index-based name mapping is a trap everywhere else in this
+-- project: the shape of the id is not the meaning of it.
+local LOCALE_MAP = {
+	fil = "fil", tl = "fil", ph = "fil",
+	de = "de", en = "en", ru = "ru",
+}
+
+local function detectLang()
+	local ok, id = pcall(function()
+		return game:GetService("LocalizationService").RobloxLocaleId
+	end)
+	if ok and type(id) == "string" then
+		id = string.lower(id)
+		-- longest first: "fil_ph" must not be read as "fi"
+		local three = string.sub(id, 1, 3)
+		if LOCALE_MAP[three] then return LOCALE_MAP[three] end
+		local two = string.sub(id, 1, 2)
+		if LOCALE_MAP[two] then return LOCALE_MAP[two] end
+		-- a Philippine client set to English still reads English, but a
+		-- Philippine REGION is a strong enough hint to offer Filipino
+		if string.find(id, "_ph", 1, true) then return "fil" end
+	end
+	return "en"
+end
+
+UI.lang = _G.__SEL_LANG
+if not UI.lang and isfile and isfile(LANG_FILE) then
+	local ok, saved = pcall(readfile, LANG_FILE)
+	if ok and type(saved) == "string" then
+		saved = string.lower((string.gsub(saved, "%s", "")))
+		for _, l in ipairs(UI.LANGS) do
+			if l == saved then UI.lang = saved end
+		end
+	end
+end
+UI.lang = UI.lang or detectLang()
+_G.__SEL_LANG = UI.lang
+
+-- One dictionary file per language, not one file with three fields per key: a
+-- client only ever renders one language, and Cyrillic costs two bytes a
+-- character, so the combined table was 121 KB against 44 for German alone.
+--
+-- Order: whatever is already loaded in this session, then the workspace copy
+-- (bridge.py sync puts it there while developing), then the repo. Cached to disk
+-- after the first download, so it costs one request ever.
+_G.__SEL_I18N = _G.__SEL_I18N or {}
+local dicts = _G.__SEL_I18N
+
+-- bridge.py sync drops this next to the dictionaries it mirrors, and it is never
+-- published - so it is present on the machine where translations are being
+-- EDITED and nowhere else. That one bit decides whether the workspace copy of a
+-- dictionary is a fresh edit (dev: it wins) or a stale download (everybody else:
+-- it is ignored and deleted).
+UI.dev = false
+pcall(function() UI.dev = (isfile and isfile("XYUREI X-FLOID-dev.txt")) and true or false end)
+
+local function dictRead(file)
+	if not (isfile and readfile and isfile(file)) then return nil end
+	local ok, disk = pcall(readfile, file)
+	if ok and type(disk) == "string" and #disk > 64 then return disk end
+	return nil
+end
+
+local function dictionary(lang)
+	lang = lang or UI.lang
+	if dicts[lang] ~= nil then return dicts[lang] or nil end
+	local name = "i18n-" .. lang .. ".lua"
+	-- The download is cached under the TEMPLATE VERSION, and that is a fix, not
+	-- tidiness. It used to be cached as i18n-<lang>.lua and that file then won
+	-- over the network on every later run - so a dictionary that gained strings
+	-- never reached anybody who had loaded a panel once, and their new controls
+	-- came up in German. A release changes UI.VERSION and the old cache is simply
+	-- not looked at again.
+	local cache = "XYUREI X-FLOID-cache/i18n-" .. lang .. "-" .. UI.VERSION .. ".lua"
+	local body
+	if UI.dev then body = dictRead(name) end
+	if not body then body = dictRead(cache) end
+	if not body then
+		local ok, web = pcall(function() return game:HttpGet(UI.RAW .. "lib/" .. name) end)
+		if ok and type(web) == "string" and #web > 64 then
+			body = web
+			pcall(function()
+				if makefolder and isfolder and not isfolder("XYUREI X-FLOID-cache") then
+					makefolder("XYUREI X-FLOID-cache")
+				end
+				writefile(cache, web)
+			end)
+			-- Drop the old unversioned copy once there is a versioned one. Left
+			-- behind it is 78 KB of dead weight per language and it would be read
+			-- as a dev edit by the branch above.
+			if not UI.dev and delfile and isfile and isfile(name) then
+				pcall(delfile, name)
+			end
+		end
+	end
+	-- Offline with only the old cache left: an outdated dictionary still reads
+	-- better than a panel that falls through to German keys.
+	if not body then body = dictRead(name) end
+	if body then
+		local chunk = loadstring and loadstring(body, "=" .. name)
+		local ok, loaded = pcall(chunk or function() end)
+		if ok and type(loaded) == "table" then dicts[lang] = loaded end
+	end
+	-- false, not nil: a language with no file must not be looked up again on
+	-- every single label. There are hundreds per panel.
+	if dicts[lang] == nil then dicts[lang] = false end
+	return dicts[lang] or nil
+end
+
+-- Translate. Leading and trailing spacing is preserved separately because a lot
+-- of the status lines are built by concatenation and carry padding that is part
+-- of the layout, not part of the sentence.
+function UI.t(text)
+	if type(text) ~= "string" or text == "" then return text end
+	local d = dictionary()
+	if not d then return text end
+	local hit = d[text]
+	if hit then return hit end
+	local lead, core, tail = string.match(text, "^(%s*)(.-)(%s*)$")
+	if core and core ~= text and core ~= "" then
+		hit = d[core]
+		if hit then return lead .. hit .. tail end
+	end
+	return text
+end
+
+-- Translate a template and fill it in one step. Sentences that carry a number
+-- have to stay ONE dictionary key - split into fragments and concatenated, the
+-- word order is frozen in German and no other language can be written properly.
+function UI.tf(template, ...)
+	local ok, out = pcall(string.format, UI.t(template), ...)
+	return ok and out or template
+end
+
+-- Every .Text assignment in this file goes through here. Setting .Text directly
+-- works but the string is then invisible to a language switch, so the label
+-- freezes in whatever language it was born in.
+local function setText(instance, text)
+	text = (text == nil) and "" or tostring(text)
+	pcall(function()
+		instance:SetAttribute(TEXT_ATTR, text)
+		instance:SetAttribute("SxFmt", nil)
+	end)
+	instance.Text = UI.t(text)
+end
+UI.setText = setText
+
+-- Text that is part sentence, part number ("3 aktiv", "2 / 5 an"). Storing the
+-- finished string would make it untranslatable, because "3 aktiv" is not a
+-- dictionary key and never will be. So the TEMPLATE is what gets stamped on the
+-- instance and the arguments ride along beside it; a language switch formats it
+-- again in the new language.
+local function setFmt(instance, template, ...)
+	local args = { ... }
+	for i = 1, #args do args[i] = tostring(args[i]) end
+	pcall(function()
+		instance:SetAttribute(TEXT_ATTR, nil)
+		instance:SetAttribute("SxFmt", template)
+		instance:SetAttribute("SxArgs", table.concat(args, "\1"))
+	end)
+	instance.Text = string.format(UI.t(template), table.unpack(args))
+end
+UI.setFmt = setFmt
+
+local function applyFmt(instance)
+	local template = instance:GetAttribute("SxFmt")
+	if not template then return end
+	local args = {}
+	for piece in string.gmatch((instance:GetAttribute("SxArgs") or "") .. "\1", "([^\1]*)\1") do
+		args[#args + 1] = piece
+	end
+	instance.Text = string.format(UI.t(template), table.unpack(args))
+end
+
+local function setPlaceholder(instance, text)
+	text = (text == nil) and "" or tostring(text)
+	pcall(function() instance:SetAttribute(HINT_ATTR, text) end)
+	instance.PlaceholderText = UI.t(text)
+end
+
+-- Live windows, weak-keyed so a destroyed panel does not keep its ScreenGui
+-- alive just because the language switch might want it later.
+local liveWindows = setmetatable({}, { __mode = "k" })
+
+local function retranslate(root)
+	if not root or not root.Parent then return end
+	for _, d in ipairs(root:GetDescendants()) do
+		local t = d:GetAttribute(TEXT_ATTR)
+		if t ~= nil then pcall(function() d.Text = UI.t(t) end) end
+		if d:GetAttribute("SxFmt") ~= nil then pcall(applyFmt, d) end
+		local h = d:GetAttribute(HINT_ATTR)
+		if h ~= nil then pcall(function() d.PlaceholderText = UI.t(h) end) end
+	end
+end
+
+function UI.setLang(code)
+	local valid = false
+	for _, l in ipairs(UI.LANGS) do
+		if l == code then valid = true end
+	end
+	if not valid or code == UI.lang then return false end
+	UI.lang = code
+	_G.__SEL_LANG = code
+	pcall(function() writefile(LANG_FILE, code) end)
+	for window in pairs(liveWindows) do
+		retranslate(window.gui)
+		if window.onLang then pcall(window.onLang, code) end
+	end
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- device and scale
+--------------------------------------------------------------------------------
+--
+-- The panel is 820x582 and that is a comfortable window on a monitor and the
+-- ENTIRE SCREEN on a phone - people run these scripts on mobile executors and
+-- the game underneath is then completely covered. So every window carries a
+-- UIScale, the scale comes from the viewport, and the device is asked once and
+-- remembered in XYUREI X-FLOID-device.txt next to XYUREI X-FLOID-lang.txt.
+--
+-- PC is deliberately left alone: the formula caps at 1, so a monitor of any
+-- normal size renders exactly what it rendered before this existed.
+local DEVICE_FILE = "XYUREI X-FLOID-device.txt"
+UI.DEVICES = { "pc", "mobile" }
+
+-- Guarded to the last line: uitest.lua runs this file against a fake Roblox that
+-- has no workspace and no camera at all, and a template that cannot be loaded
+-- outside the game loses its only test harness.
+function UI.viewport()
+	-- Test hook: there is no way to give a desktop client a phone's viewport, so
+	-- _G.__SEL_VIEWPORT forces one and the panel can be looked at at the size it
+	-- would really have on a 844x390 phone. Never set in normal use.
+	local forced = _G.__SEL_VIEWPORT
+	if typeof and typeof(forced) == "Vector2" then return forced end
+	local ok, size = pcall(function()
+		local cam = workspace and workspace.CurrentCamera
+		return cam and cam.ViewportSize
+	end)
+	if ok and size and size.X and size.X > 1 and size.Y > 1 then return size end
+	return Vector2.new(1280, 720)
+end
+
+-- Touch WITHOUT a keyboard is a phone or a tablet; a touchscreen laptop reports
+-- both and is a PC. The viewport is the second opinion, because an emulator or
+-- a mobile executor that lies about TouchEnabled still cannot fake being 1080p.
+function UI.detectDevice()
+	local touch, keyboard, mouse = false, true, true
+	pcall(function()
+		local uis = game:GetService("UserInputService")
+		touch, keyboard, mouse = uis.TouchEnabled, uis.KeyboardEnabled, uis.MouseEnabled
+	end)
+	local vp = UI.viewport()
+	local vx = tonumber(vp.X) or 1280
+	local vy = tonumber(vp.Y) or 720
+	local size = math.floor(vx) .. "x" .. math.floor(vy)
+	-- ORDER MATTERS, and getting it wrong is not theoretical: the viewport test
+	-- came first in the first version and called a WINDOWED desktop client
+	-- (958x599 here) a phone. A keyboard and a mouse together are a PC whatever
+	-- the window size is, and the viewport is only the tie-breaker for a client
+	-- that reports neither.
+	if touch and not keyboard then return "mobile", "touch, no keyboard" end
+	if keyboard and mouse then return "pc", "keyboard + mouse, " .. size end
+	if vx < 900 or vy < 500 then return "mobile", "viewport " .. size end
+	return "pc", size
+end
+
+UI.device = _G.__SEL_DEVICE
+UI.deviceAsked = _G.__SEL_DEVICE_ASKED or false
+if not UI.device and isfile and isfile(DEVICE_FILE) then
+	local ok, saved = pcall(readfile, DEVICE_FILE)
+	if ok and type(saved) == "string" then
+		saved = string.lower((string.gsub(saved, "%s", "")))
+		if saved == "pc" or saved == "mobile" then
+			UI.device = saved
+			UI.deviceAsked = true
+		end
+	end
+end
+local detected, detectWhy = UI.detectDevice()
+UI.device = UI.device or detected
+UI.detected, UI.detectWhy = detected, detectWhy
+_G.__SEL_DEVICE = UI.device
+_G.__SEL_DEVICE_ASKED = UI.deviceAsked
+
+-- How much of the screen a panel is allowed to take. On a phone the point is
+-- that the GAME stays visible, so it is capped well below the full height; on a
+-- desktop the cap of 1 means nothing changes at all.
+UI.deviceFill = { pc = 0.98, mobile = 0.80 }
+
+function UI.scaleFor(width, height)
+	local vp = UI.viewport()
+	local vx = tonumber(vp.X) or 1280
+	local vy = tonumber(vp.Y) or 720
+	local fill = UI.deviceFill[UI.device] or 0.98
+	local s = math.min(vx * fill / math.max(width, 1), vy * fill / math.max(height, 1), 1)
+	return math.max(s, 0.3)
+end
+
+-- SMALL TEXT IS THE FIRST THING THAT BREAKS WHEN THE PANEL IS SCALED DOWN, and
+-- it broke on a real phone: the 10px hint under a toggle caption, scaled by
+-- 0.54, asks Roblox for a five-pixel Gotham and gets an unreadable smear. The
+-- panel scale itself is right - only the type is too small to rasterise.
+--
+-- So every small label asks for its size through UI.small(), which puts a FLOOR
+-- under it: whatever is requested, what finally renders never falls below a few
+-- real pixels. The layout absorbs the bigger type because the rows and the page
+-- size themselves; only the read-out box has to do its own arithmetic.
+UI.MIN_TEXT_PX = 8
+
+function UI.small(size, minPx)
+	if UI.device ~= "mobile" then return size end
+	local s = UI.scaleFor(820, 582)
+	if s >= 1 then return size end
+	return math.max(size, math.ceil((minPx or UI.MIN_TEXT_PX) / s))
+end
+
+-- The device is answered AFTER the window is built (the panel waits hidden
+-- behind the card), so the sizes chosen during the build can be the wrong ones -
+-- and a user who overrides a wrong detection would otherwise be left with phone
+-- scale and desktop type. Each site registers how to redo its own sizing, keyed
+-- weakly by the instance so a destroyed panel drops out by itself.
+local smallText = setmetatable({}, { __mode = "k" })
+
+function UI.onSmall(anchor, fn)
+	smallText[anchor] = fn
+	pcall(fn)
+end
+
+function UI.refreshSmall()
+	for anchor, fn in pairs(smallText) do
+		if anchor and anchor.Parent then pcall(fn) end
+	end
+end
+
+-- Live windows register a rescale hook, so switching the device moves every open
+-- panel at once - exactly like the language switch does.
+local liveScales = setmetatable({}, { __mode = "k" })
+
+function UI.setDevice(code, remember)
+	if code ~= "pc" and code ~= "mobile" then return false end
+	UI.device = code
+	_G.__SEL_DEVICE = code
+	if remember ~= false then
+		UI.deviceAsked = true
+		_G.__SEL_DEVICE_ASKED = true
+		pcall(function() writefile(DEVICE_FILE, code) end)
+	end
+	UI.refreshSmall()
+	for window in pairs(liveScales) do
+		pcall(function() window.applyScale() end)
+	end
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- auto-start in new games
+--------------------------------------------------------------------------------
+--
+-- hub/loader.lua queues ITSELF with queue_on_teleport and re-arms on every run,
+-- and the Roblox app keeps one client process across game joins - so before this
+-- switch existed, running the loader line once meant a panel came up in every
+-- game joined afterwards, forever. Measured, not assumed: a queued marker set in
+-- one game was still there after leaving and joining an unrelated one.
+--
+-- The file is the whole contract with the loader, which reads it by itself and
+-- has no settings UI of its own. Missing file = OFF, so the repo ships nothing
+-- and nobody inherits the chain without asking for it.
+local AUTOLOAD_FILE = "XYUREI X-FLOID-autoload.txt"
+UI.AUTOLOAD_FILE = AUTOLOAD_FILE
+
+-- Read on every call rather than cached at load: the loader writes the same file
+-- from the other side, and a panel built an hour later must not show a stale
+-- switch.
+-- FAIL CLOSED, exactly like the loader's copy: file missing, file empty, file
+-- holding junk, no isfile/readfile at all, or either of them throwing - every
+-- one of those answers false. Only the three strings below are a yes, so the
+-- switch can never read as ON because something went wrong.
+function UI.getAutoload()
+	local ok, on = pcall(function()
+		if not (isfile and readfile and isfile(AUTOLOAD_FILE)) then return false end
+		local saved = readfile(AUTOLOAD_FILE)
+		if type(saved) ~= "string" then return false end
+		saved = string.lower((string.gsub(saved, "%s", "")))
+		return saved == "1" or saved == "on" or saved == "true"
+	end)
+	return ok and on == true
+end
+
+function UI.setAutoload(on)
+	on = on and true or false
+	UI.autoload = on
+	pcall(function() writefile(AUTOLOAD_FILE, on and "1" or "0") end)
+	-- The loader keeps its own copy in the handle; keep them in step so a script
+	-- reading _G.__SEL.autoStart does not disagree with the switch on screen.
+	if _G.__SEL then _G.__SEL.autoStart = on end
+	return on
+end
+
+UI.autoload = UI.getAutoload()
+
+--------------------------------------------------------------------------------
+-- saved settings
+--------------------------------------------------------------------------------
+--
+-- Every panel had exactly three things that survived a rejoin - the language, the
+-- device and the auto-start switch - and NOT ONE of the settings a player
+-- actually touches. Every toggle, slider and dropdown in all 22 scripts was back
+-- at its default on the next join. Reported from the wild twice in the same
+-- message ("config section missing (save config)" and "cannot pick the
+-- difficulty" - the difficulty dropdown was there, it just never stayed).
+--
+-- One line per script does the whole job:
+--
+--   UI.config("cleanleaves", CONFIG)     -- right after the UI is loaded
+--
+-- and the reason it needs no other change anywhere is the ORDER. Controls read
+-- their initial value out of CONFIG when they are BUILT, so merging the saved
+-- values into CONFIG *before* the panel is built makes every control come up
+-- showing the saved state by itself. Nothing has to be told what it is bound to.
+--
+-- Saving is the other half and is deliberately not a button the user has to
+-- remember: a 4s loop serialises the table and writes only when the text
+-- changed. Sorted keys make that comparison stable, so an unchanged panel never
+-- touches the disk.
+--
+-- Format is Lua source, not JSON. HttpService:JSONEncode cannot round-trip a
+-- table with mixed keys and turns an empty one into `[]`, and the dictionaries
+-- already prove that loading a table with loadstring works on every executor.
+-- The chunk is loaded with an EMPTY environment, so a corrupted or tampered file
+-- can define values and nothing else - `{[1]=os.exit()}` indexes nil and is
+-- caught by the pcall around it.
+local SAVE_FILE = "XYUREI X-FLOID-save.txt"
+UI.SAVE_FILE = SAVE_FILE
+
+-- Unlike the auto-start switch this FAILS OPEN: no file means ON. Auto-start
+-- fails closed because being wrong there puts a panel over unrelated games;
+-- being wrong here only keeps the switches somebody already set. The one hard
+-- requirement is a working file API - an executor without writefile can never
+-- save, and the switch must say so rather than pretend.
+function UI.canSave()
+	return type(isfile) == "function" and type(readfile) == "function"
+		and type(writefile) == "function"
+end
+
+function UI.getSave()
+	if not UI.canSave() then return false end
+	local ok, on = pcall(function()
+		if not isfile(SAVE_FILE) then return true end
+		local saved = readfile(SAVE_FILE)
+		if type(saved) ~= "string" then return true end
+		saved = string.lower((string.gsub(saved, "%s", "")))
+		return not (saved == "0" or saved == "off" or saved == "false")
+	end)
+	if not ok then return false end
+	return on == true
+end
+
+-- Writes, then READS THE ANSWER BACK, exactly like the auto-start switch: an
+-- executor whose writefile silently does nothing would otherwise leave a switch
+-- reading ON while nothing is ever stored.
+function UI.setSave(on)
+	on = on and true or false
+	pcall(function() writefile(SAVE_FILE, on and "1" or "0") end)
+	UI.saveOn = UI.getSave()
+	return UI.saveOn
+end
+
+UI.saveOn = UI.getSave()
+
+-- Only these four types are stored. A Color3, an Instance or a function in a
+-- CONFIG table is dropped rather than guessed at, and dropping is safe: a value
+-- that is not written is simply left at whatever the script's own default is.
+local function cfgLiteral(v)
+	local t = type(v)
+	if t == "boolean" then return tostring(v) end
+	if t == "number" then
+		-- NaN and the infinities do not survive the round trip, and a file that
+		-- does not parse takes every setting in it with it.
+		if v ~= v or v == math.huge or v == -math.huge then return nil end
+		return string.format("%.17g", v)
+	end
+	if t == "string" then return string.format("%q", v) end
+	return nil
+end
+
+-- Keys are SORTED, and that is load-bearing rather than tidy: the auto-save
+-- compares the serialised text against the last one written, and pairs() order
+-- is not stable in Luau, so an unsorted dump would look different on every pass
+-- and write the file every four seconds forever.
+local CFG_DEPTH = 3
+local function cfgSerialise(tbl, depth)
+	depth = depth or 1
+	local keys = {}
+	for k in pairs(tbl) do
+		if type(k) == "string" or type(k) == "number" then keys[#keys + 1] = k end
+	end
+	table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+
+	local parts = {}
+	for _, k in ipairs(keys) do
+		local v = tbl[k]
+		local lit = cfgLiteral(v)
+		if lit == nil and type(v) == "table" and depth < CFG_DEPTH then
+			lit = cfgSerialise(v, depth + 1)
+		end
+		if lit ~= nil then
+			local name = type(k) == "number" and ("[" .. tostring(k) .. "]")
+				or ("[" .. string.format("%q", k) .. "]")
+			parts[#parts + 1] = name .. "=" .. lit
+		end
+	end
+	return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local function cfgCopy(tbl, depth)
+	depth = depth or 1
+	local out = {}
+	for k, v in pairs(tbl) do
+		if type(k) == "string" or type(k) == "number" then
+			if cfgLiteral(v) ~= nil then
+				out[k] = v
+			elseif type(v) == "table" and depth < CFG_DEPTH then
+				out[k] = cfgCopy(v, depth + 1)
+			end
+		end
+	end
+	return out
+end
+
+local function cfgRead(file)
+	if not (isfile and readfile) then return nil end
+	local ok, body = pcall(function()
+		if not isfile(file) then return nil end
+		return readfile(file)
+	end)
+	if not ok or type(body) ~= "string" or string.sub(body, 1, 1) ~= "{" then
+		return nil
+	end
+	-- Luau kept loadstring and setfenv; plain 5.4 (lib/uitest.lua) has load with
+	-- an env argument instead. Both end up with an empty environment.
+	local chunk
+	if setfenv and loadstring then
+		chunk = loadstring("return " .. body)
+		if chunk then pcall(setfenv, chunk, {}) end
+	elseif load then
+		local ok2, made = pcall(load, "return " .. body, "XYUREI X-FLOID-cfg", "t", {})
+		chunk = ok2 and made or nil
+	end
+	-- Last resort, an executor with neither: load it unsandboxed rather than
+	-- losing the whole feature. The file is in the caller's own workspace, and
+	-- anything able to write there can already run code in this client.
+	if not chunk and loadstring then chunk = loadstring("return " .. body) end
+	if not chunk then return nil end
+	local fine, value = pcall(chunk)
+	if not fine or type(value) ~= "table" then return nil end
+	return value
+end
+
+-- Merged against the DEFAULTS, never against the live table, and only where the
+-- types agree. That is what makes an old file harmless after an update: a key
+-- that no longer exists is ignored, a key whose meaning changed from a number to
+-- a string is ignored, and a file from a different script cannot bleed in.
+local function cfgMerge(live, saved, defaults, depth)
+	for k, want in pairs(saved) do
+		local base = defaults[k]
+		if base ~= nil and type(base) == type(want) then
+			if type(base) == "table" then
+				if depth < CFG_DEPTH and type(live[k]) == "table" then
+					cfgMerge(live[k], want, base, depth + 1)
+				end
+			else
+				live[k] = want
+			end
+		end
+	end
+end
+
+-- IN PLACE. The script is holding a reference to this exact table - and often to
+-- sub-tables of it - so replacing them would leave every closure in the script
+-- writing into an orphan while the panel reads the new one.
+local function cfgRestore(live, defaults, depth)
+	depth = depth or 1
+	for k, v in pairs(defaults) do
+		if type(v) == "table" then
+			if type(live[k]) == "table" and depth < CFG_DEPTH then
+				cfgRestore(live[k], v, depth + 1)
+			else
+				live[k] = cfgCopy(v, depth + 1)
+			end
+		else
+			live[k] = v
+		end
+	end
+end
+
+UI.configs = UI.configs or {}
+
+local function cfgView(record)
+	local out = {}
+	for k, v in pairs(record.live) do
+		if not (record.skip and record.skip[k]) then out[k] = v end
+	end
+	return out
+end
+
+-- alias  the script's name in hub/index.json, so two games never share a file
+-- tbl    the live CONFIG table, merged in place
+-- opts   { skip = { key = true } } for anything that must never be stored
+function UI.config(alias, tbl, opts)
+	if type(alias) ~= "string" or type(tbl) ~= "table" then return nil end
+	opts = opts or {}
+
+	local previous = UI.configs[alias]
+	local generation = ((previous and previous.generation) or 0) + 1
+	local record = {
+		alias = alias,
+		file = "XYUREI X-FLOID-cfg-" .. alias .. ".txt",
+		live = tbl,
+		-- Taken BEFORE the merge: these are the script's own defaults and the
+		-- only thing "reset" has to restore to.
+		defaults = cfgCopy(tbl),
+		skip = opts.skip,
+		generation = generation,
+		saved = nil,
+		loaded = false,
+	}
+	UI.configs[alias] = record
+	UI.configCurrent = record
+
+	if UI.saveOn then
+		local saved = cfgRead(record.file)
+		if saved then
+			cfgMerge(record.live, saved, record.defaults, 1)
+			record.loaded = true
+		end
+	end
+	record.snapshot = cfgSerialise(cfgView(record))
+
+	-- Guarded on the generation, like every other loop in this project: a
+	-- re-executed script must not leave a second writer running against the same
+	-- file. os.clock is only read for the status line, never for the decision.
+	task.spawn(function()
+		while true do
+			task.wait(4)
+			local now = UI.configs[alias]
+			if not now or now.generation ~= generation then return end
+			if UI.saveOn then pcall(UI.configSave, alias) end
+		end
+	end)
+
+	return record
+end
+
+local function cfgRecord(alias)
+	if alias then return UI.configs[alias] end
+	return UI.configCurrent
+end
+
+-- Writes only when the serialised text actually changed, so the four-second loop
+-- costs one string build and one comparison on an idle panel.
+function UI.configSave(alias, force)
+	local record = cfgRecord(alias)
+	if not record then return false, "unknown" end
+	if not UI.canSave() then
+		record.note = "kein writefile"
+		return false, "writefile"
+	end
+	local text = cfgSerialise(cfgView(record))
+	if text == record.snapshot and not force then return true, "unchanged" end
+	local ok = pcall(writefile, record.file, text)
+	if not ok then
+		record.note = "Schreiben fehlgeschlagen"
+		return false, "write"
+	end
+	record.snapshot = text
+	record.saved = os.clock()
+	record.note = "gespeichert"
+	return true, "written"
+end
+
+-- Deleting the file is the point, not writing the defaults into it: with the
+-- file gone a later update that changes a default takes effect. delfile is not
+-- universal, so writing the defaults back is the fallback - same result for this
+-- version, just not for the next one.
+function UI.configReset(alias)
+	local record = cfgRecord(alias)
+	if not record then return false end
+	cfgRestore(record.live, record.defaults, 1)
+	record.snapshot = cfgSerialise(cfgView(record))
+	local removed = false
+	if isfile and delfile and isfile(record.file) then
+		removed = pcall(delfile, record.file)
+	end
+	if not removed and UI.canSave() then
+		pcall(writefile, record.file, record.snapshot)
+	end
+	record.saved = nil
+	record.note = "zurückgesetzt"
+	return true
+end
+
+--------------------------------------------------------------------------------
+-- Sharing a config: one code out, one code in
+--------------------------------------------------------------------------------
+--
+-- No game script gains a line for this, for the same reason none gained one for
+-- saving: UI.config already holds the live table AND the script's own defaults,
+-- and cfgMerge already knows how to take a foreign table safely. Export and
+-- import are those two pieces pointed at a string instead of at a file.
+--
+-- WHAT IS IN THE CODE IS THE DIFFERENCE TO THE DEFAULTS, not the whole table.
+-- Two reasons, and the second matters more than the size:
+--
+--   * size - a full config serialises to about 2 KB, which base64 turns into
+--     2.7 KB and Discord will not take in one message. What somebody actually
+--     changed is usually a handful of keys.
+--   * meaning - the code says "these are the switches I moved". A later update
+--     that changes a default therefore still reaches whoever imports it, instead
+--     of being pinned to the exporter's version of the defaults forever.
+--
+-- The walk is over DEFAULTS, never over the live table, so a key that is not
+-- part of the script's declared config cannot leave the machine even if
+-- something else put it there.
+local function cfgDiff(live, defaults, depth)
+	depth = depth or 1
+	local out, n = {}, 0
+	for k, base in pairs(defaults) do
+		local now = live[k]
+		if type(base) == "table" then
+			if type(now) == "table" and depth < CFG_DEPTH then
+				local sub, count = cfgDiff(now, base, depth + 1)
+				if count > 0 then
+					out[k] = sub
+					n = n + count
+				end
+			end
+		elseif now ~= nil and now ~= base and type(now) == type(base)
+			and cfgLiteral(now) ~= nil then
+			out[k] = now
+			n = n + 1
+		end
+	end
+	return out, n
+end
+
+-- Base64, because the payload is Lua source and Discord's markdown eats it:
+-- underscores and asterisks in a raw table literal come out the other side as
+-- italics with characters missing, and the paste is silently corrupt. Roblox has
+-- no base64 of its own, so here it is.
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64DEC
+
+local function b64encode(data)
+	local out, i = {}, 1
+	while i <= #data do
+		local a = string.byte(data, i)
+		local b = string.byte(data, i + 1)
+		local c = string.byte(data, i + 2)
+		local bits = a * 65536 + (b or 0) * 256 + (c or 0)
+		local c1 = math.floor(bits / 262144) % 64
+		local c2 = math.floor(bits / 4096) % 64
+		local c3 = math.floor(bits / 64) % 64
+		local c4 = bits % 64
+		out[#out + 1] = string.sub(B64, c1 + 1, c1 + 1)
+		out[#out + 1] = string.sub(B64, c2 + 1, c2 + 1)
+		out[#out + 1] = b and string.sub(B64, c3 + 1, c3 + 1) or "="
+		out[#out + 1] = c and string.sub(B64, c4 + 1, c4 + 1) or "="
+		i = i + 3
+	end
+	return table.concat(out)
+end
+
+local function b64decode(text)
+	if not B64DEC then
+		B64DEC = {}
+		for i = 1, 64 do B64DEC[string.sub(B64, i, i)] = i - 1 end
+	end
+	-- Everything that is not an alphabet character goes, which is what makes a
+	-- code survive being wrapped across lines by Discord or a forum post.
+	text = string.gsub(text, "[^A-Za-z0-9+/=]", "")
+	local out, i = {}, 1
+	while i <= #text do
+		local s1 = string.sub(text, i, i)
+		local s2 = string.sub(text, i + 1, i + 1)
+		local s3 = string.sub(text, i + 2, i + 2)
+		local s4 = string.sub(text, i + 3, i + 3)
+		local c1, c2 = B64DEC[s1], B64DEC[s2]
+		if c1 == nil or c2 == nil then return nil end
+		local c3, c4 = B64DEC[s3], B64DEC[s4]
+		local bits = c1 * 262144 + c2 * 4096 + (c3 or 0) * 64 + (c4 or 0)
+		out[#out + 1] = string.char(math.floor(bits / 65536) % 256)
+		if s3 ~= "" and s3 ~= "=" then
+			out[#out + 1] = string.char(math.floor(bits / 256) % 256)
+		end
+		if s4 ~= "" and s4 ~= "=" then
+			out[#out + 1] = string.char(bits % 256)
+		end
+		i = i + 4
+	end
+	return table.concat(out)
+end
+
+-- Not a hash for security - the merge below is what makes a hostile code
+-- harmless. This only catches a TRUNCATED paste, which is the realistic failure:
+-- somebody copies half a wrapped line and a partial config imports cleanly
+-- because every key in it happens to be valid. No bit operations, so the same
+-- code runs under Luau and under the plain 5.4 the test harness uses.
+local function cfgSum(text)
+	local h = 7
+	for i = 1, #text do
+		h = (h * 31 + string.byte(text, i)) % 1000000007
+	end
+	return h
+end
+
+UI.SHARE_PREFIX = "XYUREI X-FLOID1."
+
+-- Returns code, count  or  nil, reason
+function UI.configExport(alias)
+	local record = cfgRecord(alias)
+	if not record then return nil, "unknown" end
+	local diff, count = cfgDiff(cfgView(record), record.defaults, 1)
+	if count == 0 then return nil, "unchanged" end
+	local body = cfgSerialise(diff)
+	local payload = record.alias .. "\1" .. tostring(cfgSum(body)) .. "\1" .. body
+	return UI.SHARE_PREFIX .. b64encode(payload), count
+end
+
+-- Returns true, count  or  false, reason
+--
+-- The reason is never swallowed. A code from another script merges to exactly
+-- nothing - every key is unknown, so cfgMerge correctly ignores all of it - and
+-- from the outside that is a button that does nothing. The alias is checked
+-- first so it can say WHICH script the code belongs to.
+function UI.configImport(code, alias)
+	local record = cfgRecord(alias)
+	if not record then return false, "unknown" end
+	if type(code) ~= "string" then return false, "empty" end
+	code = string.gsub(code, "%s", "")
+	if code == "" then return false, "empty" end
+	if string.sub(code, 1, #UI.SHARE_PREFIX) ~= UI.SHARE_PREFIX then
+		return false, "prefix"
+	end
+
+	local raw = b64decode(string.sub(code, #UI.SHARE_PREFIX + 1))
+	if not raw then return false, "garbled" end
+	local gotAlias, gotSum, body = string.match(raw, "^([^\1]*)\1([^\1]*)\1(.*)$")
+	if not gotAlias then return false, "garbled" end
+	if gotAlias ~= record.alias then return false, "wrong:" .. gotAlias end
+	if tostring(cfgSum(body)) ~= gotSum then return false, "truncated" end
+	if string.sub(body, 1, 1) ~= "{" then return false, "garbled" end
+
+	local chunk
+	if setfenv and loadstring then
+		chunk = loadstring("return " .. body)
+		if chunk then pcall(setfenv, chunk, {}) end
+	elseif load then
+		local made, err = load("return " .. body, "XYUREI X-FLOID-share", "t", {})
+		chunk = made
+	end
+	if not chunk then return false, "garbled" end
+	local fine, value = pcall(chunk)
+	if not fine or type(value) ~= "table" then return false, "garbled" end
+
+	-- The same merge the saved file goes through, and it is the whole security
+	-- story: only keys this script declares, only where the type matches, only
+	-- boolean / number / string and tables of them, three levels deep, loaded in
+	-- an empty environment. A hostile code can move your own sliders and nothing
+	-- else - it cannot define a function, reach an Instance or run anything.
+	local before = cfgSerialise(cfgView(record))
+	cfgMerge(record.live, value, record.defaults, 1)
+	local after = cfgSerialise(cfgView(record))
+
+	local _, count = cfgDiff(value, record.defaults, 1)
+	if after == before then return true, 0 end
+	if UI.saveOn then pcall(UI.configSave, record.alias, true) end
+	return true, count
+end
+
+-- The flag itself: the repo copy for everybody, the workspace copy while
+-- developing, and the two letters when neither is reachable. A panel must never
+-- lose its language switch because an image did not load.
+local flagCache = {}
+function UI.flag(code)
+	if flagCache[code] ~= nil then return flagCache[code] or nil end
+	local id = UI.image("icons/XYUREI X-FLOID-flag-" .. code .. ".png")
+	if not id then id = UI.imageFromUrl(UI.RAW .. "flags/" .. code .. ".png",
+		"XYUREI X-FLOID-cache/flag-" .. code .. ".png") end
+	flagCache[code] = id or false
+	return id
+end
+
+
+local EASE = {
+	quick = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	soft = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	snap = TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+	slow = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+	rise = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+}
+
+--------------------------------------------------------------------------------
+-- helpers
+--------------------------------------------------------------------------------
+
+local function tween(instance, info, props)
+	local t = TweenService:Create(instance, info, props)
+	t:Play()
+	return t
+end
+
+local function corner(instance, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 9)
+	c.Parent = instance
+	return c
+end
+
+local function stroke(instance, color, alpha, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color or UI.theme.band
+	s.Transparency = alpha or 0
+	s.Thickness = thickness or 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = instance
+	return s
+end
+
+local function pad(instance, l, r, t, b)
+	local p = Instance.new("UIPadding")
+	p.PaddingLeft = UDim.new(0, l or 0)
+	p.PaddingRight = UDim.new(0, r or l or 0)
+	p.PaddingTop = UDim.new(0, t or 0)
+	p.PaddingBottom = UDim.new(0, b or t or 0)
+	p.Parent = instance
+	return p
+end
+
+local function listLayout(parent, gap, dir)
+	local l = Instance.new("UIListLayout")
+	l.FillDirection = dir or Enum.FillDirection.Vertical
+	l.SortOrder = Enum.SortOrder.LayoutOrder
+	l.Padding = UDim.new(0, gap or 0)
+	l.Parent = parent
+	return l
+end
+
+local function frame(parent, size, position, color, transparency)
+	local f = Instance.new("Frame")
+	f.Size = size or UDim2.fromScale(1, 1)
+	f.Position = position or UDim2.fromOffset(0, 0)
+	f.BackgroundColor3 = color or UI.theme.window
+	f.BackgroundTransparency = transparency or 0
+	f.BorderSizePixel = 0
+	f.Parent = parent
+	return f
+end
+
+-- One horizontal drag, shared by the slider and the colour bars, and it has to
+-- be ONE because the old per-control version was wrong in the same way twice.
+-- It armed on MouseButton1Down and disarmed only on an InputEnded of type
+-- MouseButton1 - but a finger ends as UserInputType.Touch, so on a phone the
+-- drag never ended: every later swipe ANYWHERE on the screen kept moving the
+-- last slider touched (reported by phone users, 2026-09-25).
+--
+-- So the drag is bound to the InputObject that started it: a finger is followed
+-- by its own InputObject (Roblox reuses it for the whole touch), the mouse by
+-- MouseMovement, and the drag ends when THAT input ends. A state check on every
+-- change heals a missed InputEnded, which a finger lifted over the top bar can
+-- cause. The position is read off the input itself instead of GetMouseLocation,
+-- which on a touch client is wherever the last finger happened to be.
+local function dragX(hit, track, onAlpha, allowed)
+	local active = nil
+	local function follow(pos)
+		if not track.Parent then active = nil return end
+		if allowed and not allowed() then return end
+		local a = (pos.X - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X)
+		onAlpha(math.clamp(a, 0, 1))
+	end
+	local function over(input)
+		local ok, state = pcall(function() return input.UserInputState end)
+		return (not ok) or state == Enum.UserInputState.End
+			or state == Enum.UserInputState.Cancel
+	end
+	hit.InputBegan:Connect(function(input)
+		local t = input.UserInputType
+		if t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch then
+			active = input
+			follow(input.Position)
+		end
+	end)
+	local changed = UserInputService.InputChanged:Connect(function(input)
+		if not active then return end
+		if over(active) then active = nil return end
+		if input == active or (active.UserInputType == Enum.UserInputType.MouseButton1
+			and input.UserInputType == Enum.UserInputType.MouseMovement) then
+			follow(input.Position)
+		end
+	end)
+	local ended = UserInputService.InputEnded:Connect(function(input)
+		if not active then return end
+		if input == active or input.UserInputType == active.UserInputType then
+			active = nil
+		end
+	end)
+	-- The panel is rebuilt on a reload; without this every old control would keep
+	-- two global connections alive for the rest of the session.
+	track.Destroying:Connect(function()
+		active = nil
+		changed:Disconnect()
+		ended:Disconnect()
+	end)
+end
+
+local function label(parent, text, size, font, color, alpha)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	setText(l, text)
+	l.TextSize = size or 12
+	l.Font = font or UI.font.body
+	l.TextColor3 = color or UI.theme.textSoft
+	l.TextTransparency = alpha or 0
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.TextYAlignment = Enum.TextYAlignment.Center
+	l.RichText = true
+	l.Parent = parent
+	return l
+end
+
+-- A hairline. Roblox rounds a 1px frame away at some resolutions if it is given
+-- a scale height, so these are always offset-sized.
+local function hairline(parent, inset, color)
+	local h = frame(parent, UDim2.new(1, -(inset or 0) * 2, 0, 1),
+		UDim2.fromOffset(inset or 0, 0), color or UI.theme.line)
+	return h
+end
+
+-- Draw an icon into `parent`: an ImageLabel if the PNG is there, a TextLabel
+-- with the glyph if it is not. Returns the instance plus a tint(colour) function,
+-- so the caller does not have to care which of the two it got - the rail tints
+-- the active page and the card bands tint themselves the same way.
+-- Scripts call these setters with a COLON (weaponLabel:set(x), out:set(lines)),
+-- which passes the wrapper table as the first argument and the real value as the
+-- second. Written as set(value) the value silently becomes the table and the
+-- control either shows nothing or errors - it cost a blank read-out in every
+-- panel and a broken weapon line in lootevo. arg() takes both call styles.
+local function arg(a, b)
+	if b ~= nil then return b end
+	if type(a) == "table" and (a.set ~= nil or a.get ~= nil) then return nil end
+	return a
+end
+
+local function iconNode(parent, glyph, size, colour)
+	local file = UI.iconFile[glyph]
+	local id = file and UI.image("icons/XYUREI X-FLOID-" .. file .. ".png") or nil
+	-- ...and if the workspace has no copy, fetch it from the repo, exactly like
+	-- the flags do. Only `icons/discord.png` used to be published, so the whole
+	-- icon set existed on the DEVELOPMENT machine and nowhere else: every panel in
+	-- the wild fell through to the Unicode glyph, which is the tofu box this file
+	-- warns about three screens up. Cached after the first download.
+	if not id and file then
+		id = UI.imageFromUrl(UI.RAW .. "icons/" .. file .. ".png",
+			"XYUREI X-FLOID-cache/icon-" .. file .. ".png")
+	end
+	if id then
+		local img = Instance.new("ImageLabel")
+		img.BackgroundTransparency = 1
+		img.Image = id
+		img.ImageColor3 = colour or UI.theme.dimmer
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Size = UDim2.fromOffset(size, size)
+		img.Parent = parent
+		return img, function(c) img.ImageColor3 = c end
+	end
+	local l = label(parent, glyph or "", size, UI.font.body, colour or UI.theme.dimmer)
+	l.Size = UDim2.fromOffset(size + 4, size + 4)
+	l.TextXAlignment = Enum.TextXAlignment.Center
+	return l, function(c) l.TextColor3 = c end
+end
+
+-- The mockup's `rise` keyframe: fade in and lift 14px. Used on every block so a
+-- page change reads as content arriving rather than as a redraw.
+local function rise(instance, delay)
+	local goalPos = instance.Position
+	instance.Position = goalPos + UDim2.fromOffset(0, 14)
+	for _, d in ipairs(instance:GetDescendants()) do
+		if d:IsA("TextLabel") or d:IsA("TextButton") then
+			d.TextTransparency = 1
+		end
+	end
+	instance.BackgroundTransparency = 1
+	task.delay(delay or 0, function()
+		if not instance.Parent then return end
+		tween(instance, EASE.rise, { Position = goalPos, BackgroundTransparency = 0 })
+		for _, d in ipairs(instance:GetDescendants()) do
+			if d:IsA("TextLabel") or d:IsA("TextButton") then
+				tween(d, EASE.rise, { TextTransparency = 0 })
+			end
+		end
+	end)
+end
+
+-- One shared Heartbeat drives every pulsing dot. A RunService connection per
+-- element is what turns a Roblox panel into a stutter; this was measured at 59
+-- FPS with sixteen live elements in v2 and the same driver is kept.
+local pulses, pulseConn = {}, nil
+local function registerPulse(instance, period, lo, hi)
+	pulses[instance] = { period = period or 2.2, lo = lo or 0.65, hi = hi or 0 }
+	if pulseConn then return end
+	pulseConn = RunService.Heartbeat:Connect(function()
+		local t = os.clock()
+		local live = false
+		for inst, cfg in pairs(pulses) do
+			if inst.Parent then
+				live = true
+				local a = (math.sin(t * math.pi * 2 / cfg.period) + 1) / 2
+				inst.BackgroundTransparency = cfg.hi + (cfg.lo - cfg.hi) * a
+			else
+				pulses[inst] = nil
+			end
+		end
+		if not live then
+			pulseConn:Disconnect()
+			pulseConn = nil
+		end
+	end)
+end
+
+-- v2 exposed registerSpin for rotating accent gradients. The v3 accent is flat,
+-- but a script may still call it, so it stays as a no-op-safe shim.
+local function registerSpin(gradient)
+	if gradient then gradient.Rotation = 0 end
+end
+
+local function press(button, color)
+	-- A sibling flash, never a colour tween on the button itself: tweening the
+	-- fill fights the hover tween and the two cancel each other mid-click.
+	local flash = frame(button, UDim2.fromScale(1, 1), nil, color or Color3.new(1, 1, 1), 0.8)
+	flash.ZIndex = button.ZIndex + 3
+	corner(flash, 8)
+	tween(flash, EASE.soft, { BackgroundTransparency = 1 })
+	task.delay(0.2, function() flash:Destroy() end)
+end
+
+--------------------------------------------------------------------------------
+-- the device question
+--------------------------------------------------------------------------------
+--
+-- Asked ONCE, the first time any panel is built on this executor, and then never
+-- again - the answer lives in XYUREI X-FLOID-device.txt. It is deliberately a tiny card
+-- and not a full-screen dialog: the whole point of the question is that a
+-- full-screen anything is unusable on a phone, so the question itself must not
+-- be one. The detected answer is pre-selected, so on a desktop it is one click
+-- (or no click at all - the panel is already correct behind it).
+function UI.askDevice(onDone)
+	if UI.deviceGui and UI.deviceGui.Parent then return UI.deviceGui end
+
+	-- 300x264 rather than 300x186: the auto-start switch shares this card. The
+	-- mark in the rail is the only control every panel has in the same place, so
+	-- a second popup for one boolean would only be a second thing to find.
+	local W, H = 300, 264
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "XYUREI X-FLOIDDevice"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = 1000
+	hostGui(gui)
+	UI.deviceGui = gui
+
+	local card = frame(gui, UDim2.fromOffset(W, H), nil, UI.theme.window)
+	card.AnchorPoint = Vector2.new(0.5, 0.5)
+	card.Position = UDim2.fromScale(0.5, 0.5)
+	card.Active = true
+	card.Draggable = true
+	corner(card, 13)
+	stroke(card, UI.theme.accent, 0.4)
+	local cardScale = Instance.new("UIScale")
+	cardScale.Scale = UI.scaleFor(W, H)
+	cardScale.Parent = card
+
+	local title = label(card, UI.BRAND, 13, UI.font.heading, UI.theme.accentSoft)
+	title.Position = UDim2.fromOffset(16, 12)
+	title.Size = UDim2.fromOffset(120, 16)
+
+	local question = label(card, "Panel-Größe: PC oder Handy?", 14, UI.font.heading, UI.theme.text)
+	question.Position = UDim2.fromOffset(16, 34)
+	question.Size = UDim2.new(1, -32, 0, 20)
+
+	local hint = label(card, "Auf dem Handy wird das Panel kleiner skaliert, damit das Spiel sichtbar bleibt.",
+		11, UI.font.body, UI.theme.muted)
+	hint.Position = UDim2.fromOffset(16, 56)
+	hint.Size = UDim2.new(1, -32, 0, 30)
+	hint.TextWrapped = true
+	hint.TextYAlignment = Enum.TextYAlignment.Top
+
+	local found = label(card, "", 10, UI.font.body, UI.theme.faint)
+	found.Position = UDim2.fromOffset(16, H - 26)
+	found.Size = UDim2.new(1, -32, 0, 14)
+	setText(found, "erkannt: " .. UI.detected .. " (" .. tostring(UI.detectWhy) .. ")")
+
+	local buttons = {}
+	local function paint()
+		for code, b in pairs(buttons) do
+			local on = (code == UI.device)
+			tween(b.button, EASE.quick, {
+				BackgroundColor3 = on and UI.theme.accent or UI.theme.input,
+				BackgroundTransparency = on and 0 or 0.25,
+			})
+			tween(b.text, EASE.quick, { TextColor3 = on and UI.theme.window or UI.theme.textSoft })
+		end
+	end
+
+	local labels = { pc = "PC", mobile = "Handy" }
+	for i, code in ipairs(UI.DEVICES) do
+		-- 128x40 is a finger, not a mouse pointer: anything smaller is a miss on a
+		-- phone, which is precisely the device this question exists for.
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.fromOffset(128, 40)
+		b.Position = UDim2.fromOffset(16 + (i - 1) * 140, 96)
+		b.BackgroundColor3 = UI.theme.input
+		b.BorderSizePixel = 0
+		b.Text = ""
+		b.AutoButtonColor = false
+		b.Parent = card
+		corner(b, 9)
+		local text = label(b, labels[code] or code, 14, UI.font.heading, UI.theme.textSoft)
+		text.Size = UDim2.fromScale(1, 1)
+		text.TextXAlignment = Enum.TextXAlignment.Center
+		buttons[code] = { button = b, text = text }
+		-- task.delay rather than task.wait: the handler must not yield. A real tap
+		-- would survive it, but a synthetic con:Fire() runs the body inline and
+		-- died on "thread is not yieldable", which left the card on screen with
+		-- the choice already saved - the one state that looks broken to a user.
+		b.MouseButton1Click:Connect(function()
+			UI.setDevice(code)
+			paint()
+			UI.deviceGui = nil
+			task.delay(0.15, function() pcall(function() gui:Destroy() end) end)
+			if onDone then pcall(onDone, code) end
+		end)
+	end
+	paint()
+
+	----------------------------------------------------------------- auto-start
+	hairline(card, 16, UI.theme.band).Position = UDim2.fromOffset(16, 150)
+
+	local autoCap = label(card, "Auto-Start in neuen Spielen", 12, UI.font.heading, UI.theme.text)
+	autoCap.Position = UDim2.fromOffset(16, 160)
+	autoCap.Size = UDim2.fromOffset(184, 16)
+
+	local autoHint = label(card, "Aus: das Panel kommt nur in dem Spiel, in dem du den Loader ausführst.",
+		10, UI.font.body, UI.theme.muted)
+	autoHint.Position = UDim2.fromOffset(16, 180)
+	autoHint.Size = UDim2.new(1, -32, 0, 40)
+	autoHint.TextWrapped = true
+	autoHint.TextYAlignment = Enum.TextYAlignment.Top
+
+	-- 68x30, same reasoning as the device buttons above: this card exists for
+	-- phones, so nothing on it may be smaller than a fingertip.
+	local autoBtn = Instance.new("TextButton")
+	autoBtn.Size = UDim2.fromOffset(68, 30)
+	autoBtn.Position = UDim2.fromOffset(W - 84, 154)
+	autoBtn.BackgroundColor3 = UI.theme.input
+	autoBtn.BorderSizePixel = 0
+	autoBtn.Text = ""
+	autoBtn.AutoButtonColor = false
+	autoBtn.Parent = card
+	corner(autoBtn, 9)
+	local autoText = label(autoBtn, "AUS", 13, UI.font.heading, UI.theme.textSoft)
+	autoText.Size = UDim2.fromScale(1, 1)
+	autoText.TextXAlignment = Enum.TextXAlignment.Center
+
+	-- Read from disk rather than from UI.autoload: the loader writes the same
+	-- file, so the card must show what is actually on disk right now.
+	local autoOn = UI.getAutoload()
+	local function paintAuto()
+		setText(autoText, autoOn and "AN" or "AUS")
+		tween(autoBtn, EASE.quick, {
+			BackgroundColor3 = autoOn and UI.theme.good or UI.theme.input,
+			BackgroundTransparency = autoOn and 0 or 0.25,
+		})
+		tween(autoText, EASE.quick, {
+			TextColor3 = autoOn and UI.theme.window or UI.theme.textSoft,
+		})
+	end
+	paintAuto()
+
+	autoBtn.MouseButton1Click:Connect(function()
+		UI.setAutoload(not autoOn)
+		-- Read the answer back rather than trusting the write. An executor with
+		-- no working writefile - and mobile ones are exactly where that happens -
+		-- would otherwise leave the button reading AN while the loader keeps
+		-- seeing OFF. Snapping back to AUS is the honest outcome: nothing was
+		-- saved, and the switch says so.
+		autoOn = UI.getAutoload()
+		paintAuto()
+		if autoOn then
+			setText(autoHint, "An: das Panel kommt in jedem Spiel, das XYUREI X-FLOID kennt.")
+		else
+			setText(autoHint, "Aus: das Panel kommt nur in dem Spiel, in dem du den Loader ausführst.")
+		end
+	end)
+
+	return gui
+end
+
+--------------------------------------------------------------------------------
+-- window
+--------------------------------------------------------------------------------
+
+function UI.Window(options)
+	options = options or {}
+	local width = options.width or 820
+	local height = options.height or 582
+	local window = {}
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = options.name or ("XYUREI X-FLOID_" .. tostring(math.random(1e5, 1e6)))
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	gui.DisplayOrder = 999
+	hostGui(gui)
+	window.gui = gui
+
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromOffset(width, height)
+	root.Position = UDim2.new(0.5, -width / 2, 0.5, -height / 2)
+	-- Everything below is laid out in offsets against 820x582, and rewriting all
+	-- of it in scale units would break every measured position in this file. One
+	-- UIScale on the root does the whole job instead: it multiplies the rendered
+	-- size of the frame and every descendant, about the AnchorPoint - which is
+	-- (0,0) here, so the position has to be recentred by hand whenever it changes.
+	local rootScale = Instance.new("UIScale")
+	rootScale.Scale = 1
+	rootScale.Parent = root
+
+	-- THE QUESTION COMES FIRST. Building the panel and showing the card on top of
+	-- it means a phone sees the full-screen panel it was about to fix, so the
+	-- window is built - the script keeps adding pages to it as usual - and simply
+	-- stays hidden until the device is known. It is revealed at the right scale,
+	-- so a phone never renders a desktop-sized panel for even one frame.
+	local pendingDevice = not UI.deviceAsked
+	if pendingDevice then root.Visible = false end
+	root.BackgroundColor3 = UI.theme.window
+	root.BorderSizePixel = 0
+	root.Active = true
+	root.Draggable = true
+	root.ClipsDescendants = true
+	root.Parent = gui
+	corner(root, 13)
+	stroke(root, UI.theme.edge, 0)
+	window.root = root
+
+	-- drop shadow: box-shadow 0 26px 60px rgba(0,0,0,.65)
+	local shadow = Instance.new("ImageLabel")
+	shadow.BackgroundTransparency = 1
+	shadow.Image = "rbxassetid://1316045217"
+	shadow.ImageColor3 = Color3.new(0, 0, 0)
+	shadow.ImageTransparency = 0.35
+	shadow.ScaleType = Enum.ScaleType.Slice
+	shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+	shadow.Size = UDim2.new(1, 60, 1, 60)
+	shadow.Position = UDim2.fromOffset(-30, -4)
+	shadow.ZIndex = 0
+	shadow.Parent = root
+
+	----------------------------------------------------------------- icon rail
+	local rail = frame(root, UDim2.new(0, 46, 1, 0), nil, UI.theme.rail)
+	rail.ZIndex = 2
+	local railEdge = frame(rail, UDim2.new(0, 1, 1, 0), UDim2.new(1, -1, 0, 0), UI.theme.line)
+	railEdge.ZIndex = 3
+
+	-- The real mark if it is on disk, the violet tile with a letter if it is not.
+	-- The PNG is the outlined hex on transparent, so it wants the rail's own dark
+	-- background behind it - putting it on the violet tile kills the contrast.
+	local logoId = UI.image(options.logo or UI.LOGO)
+	local badge, badgeText
+	if logoId then
+		badge = Instance.new("ImageLabel")
+		badge.Size = UDim2.fromOffset(28, 28)
+		badge.Position = UDim2.fromOffset(9, 10)
+		badge.BackgroundTransparency = 1
+		badge.Image = logoId
+		badge.ScaleType = Enum.ScaleType.Fit
+		badge.ZIndex = 3
+		badge.Parent = rail
+	else
+		badge = frame(rail, UDim2.fromOffset(26, 26), UDim2.fromOffset(10, 11), UI.theme.accent)
+		badge.ZIndex = 3
+		corner(badge, 8)
+		badgeText = label(badge, options.badge or "S", 14, UI.font.heading, UI.theme.window)
+		badgeText.Size = UDim2.fromScale(1, 1)
+		badgeText.TextXAlignment = Enum.TextXAlignment.Center
+		badgeText.ZIndex = 4
+	end
+
+	-- The device question has to be reachable again after it has been answered -
+	-- a phone that was answered "PC" by accident would otherwise be stuck with a
+	-- panel covering the whole screen and no way back. The mark in the rail is
+	-- the button; there is no room in the header for another chip and the mark is
+	-- the one element every panel has in the same place.
+	local badgeHit = Instance.new("TextButton")
+	badgeHit.Size = UDim2.fromOffset(34, 34)
+	badgeHit.Position = UDim2.fromOffset(6, 7)
+	badgeHit.BackgroundTransparency = 1
+	badgeHit.Text = ""
+	badgeHit.AutoButtonColor = false
+	badgeHit.ZIndex = 5
+	badgeHit.Parent = rail
+	badgeHit.MouseButton1Click:Connect(function() pcall(UI.askDevice) end)
+
+	local railList = frame(rail, UDim2.new(1, 0, 1, -100), UDim2.fromOffset(0, 46), UI.theme.rail, 1)
+	railList.ZIndex = 3
+	local railLayout = listLayout(railList, 6)
+	railLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+	----------------------------------------------------------------- content
+	local content = frame(root, UDim2.new(1, -46, 1, 0), UDim2.fromOffset(46, 0), UI.theme.window)
+	content.ZIndex = 1
+
+	-- header, 38px
+	local head = frame(content, UDim2.new(1, 0, 0, 38), nil, UI.theme.header)
+	head.ZIndex = 2
+	hairline(head, 0, UI.theme.edge).Position = UDim2.new(0, 0, 1, -1)
+
+	local brand = label(head, UI.BRAND, 13, UI.font.heading, UI.theme.textSoft)
+	brand.Position = UDim2.fromOffset(14, 0)
+	brand.Size = UDim2.fromOffset(48, 38)
+	brand.ZIndex = 3
+
+	local brandDiv = frame(head, UDim2.fromOffset(1, 13), UDim2.fromOffset(66, 13), UI.theme.band)
+	brandDiv.ZIndex = 3
+
+	local pageName = label(head, options.title or "Panel", 13, UI.font.body, UI.theme.muted)
+	pageName.Position = UDim2.fromOffset(76, 0)
+	pageName.Size = UDim2.fromOffset(110, 38)
+	pageName.ZIndex = 3
+	window.pageName = pageName
+
+	local headSub = label(head, options.subtitle or "", 11, UI.font.body, UI.theme.faint)
+	headSub.Position = UDim2.fromOffset(190, 0)
+	headSub.Size = UDim2.fromOffset(90, 38)
+	headSub.ZIndex = 3
+	window.headSub = headSub
+
+	-- The header is three clusters and they used to be placed independently, which
+	-- is why they collided: the flag strip grew with UI.LANGS, the "18 aktiv" count
+	-- sat at a hardcoded offset that assumed three flags, and the two overlapped by
+	-- 14px - the count was drawn UNDER the first flag and read as "18 ak". So the
+	-- right-hand block is measured once here and everything is placed from it.
+	local FLAG_STEP = 23
+	local flagWidth = #UI.LANGS * FLAG_STEP - 4
+	local COUNT_W = 66
+	-- window buttons (52) + flags + a gap + the count, as a distance from the right
+	local RIGHT_BLOCK = 52 + flagWidth + 10 + COUNT_W
+	local HEAD_W = width - 46
+	local LEFT_BLOCK = 286               -- brand, page name, subtitle
+
+	-- search sits in the middle of the header, like the mockup
+	-- Actually centred on the header now, not "somewhere right of centre": it was
+	-- pinned 368px off the right edge, so on a 920 panel its middle sat 47px past
+	-- the middle of the bar. Centred, then clamped so it can never slide under
+	-- either cluster on a narrower window.
+	-- Drawn as a real field. It used to be fully transparent with no outline, so
+	-- the placeholder floated in the header and there was no telling where the
+	-- box began or ended.
+	local SEARCH_W = 172
+	local searchX = math.floor((HEAD_W - SEARCH_W) / 2)
+	searchX = math.min(searchX, HEAD_W - RIGHT_BLOCK - SEARCH_W - 8)
+	searchX = math.max(searchX, LEFT_BLOCK)
+	local searchWrap = frame(head, UDim2.fromOffset(SEARCH_W, 24), UDim2.fromOffset(searchX, 7),
+		UI.theme.input, 0)
+	searchWrap.ZIndex = 3
+	corner(searchWrap, 7)
+	local searchEdge = stroke(searchWrap, UI.theme.band, 0)
+	pad(searchWrap, 10, 10, 0, 0)
+	-- No magnifier glyph: Roblox draws ⌕ as a tofu box. The placeholder says
+	-- "Suche" and that is enough - a box that means nothing is worse than no icon.
+	local search = Instance.new("TextBox")
+	search.BackgroundTransparency = 1
+	search.Position = UDim2.fromOffset(0, 0)
+	search.Size = UDim2.new(1, 0, 1, 0)
+	search.Text = ""
+	setPlaceholder(search, "Suche")
+	search.TextSize = 12
+	search.Font = UI.font.body
+	search.TextColor3 = UI.theme.textSoft
+	search.PlaceholderColor3 = UI.theme.faint
+	search.TextXAlignment = Enum.TextXAlignment.Left
+	search.ClearTextOnFocus = false
+	search.ZIndex = 4
+	search.Parent = searchWrap
+	search.Focused:Connect(function()
+		tween(searchEdge, EASE.quick, { Color = UI.theme.accent })
+	end)
+	search.FocusLost:Connect(function()
+		tween(searchEdge, EASE.quick, { Color = UI.theme.band })
+	end)
+
+	local activeCount = label(head, "0 aktiv", 11, UI.font.body, UI.theme.accentSoft)
+	activeCount.Position = UDim2.new(1, -RIGHT_BLOCK, 0, 0)
+	activeCount.Size = UDim2.fromOffset(COUNT_W, 38)
+	activeCount.TextXAlignment = Enum.TextXAlignment.Right
+	activeCount.ZIndex = 3
+	window.activeCount = activeCount
+
+	-- 20x20 is a mouse target. On a phone the panel is scaled to about half, so
+	-- the same button lands near 10 points across - smaller than a fingertip and
+	-- effectively unpressable. The background is transparent and the glyph is
+	-- centred, so growing the button only grows what can be hit.
+	local headHit = (UI.device == "mobile") and 30 or 20
+	local function headButton(text, offset, onClick)
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.fromOffset(headHit, headHit)
+		b.Position = UDim2.new(1, offset - (headHit - 20) / 2, 0, 9 - (headHit - 20) / 2)
+		b.BackgroundColor3 = Color3.new(1, 1, 1)
+		b.BackgroundTransparency = 1
+		b.BorderSizePixel = 0
+		b.Text = text
+		b.TextSize = 12
+		b.Font = UI.font.heading
+		b.TextColor3 = UI.theme.dimmer
+		b.AutoButtonColor = false
+		b.ZIndex = 3
+		b.Parent = head
+		corner(b, 6)
+		b.MouseEnter:Connect(function()
+			tween(b, EASE.quick, { BackgroundTransparency = 0.93, TextColor3 = UI.theme.textSoft })
+		end)
+		b.MouseLeave:Connect(function()
+			tween(b, EASE.quick, { BackgroundTransparency = 1, TextColor3 = UI.theme.dimmer })
+		end)
+		b.MouseButton1Click:Connect(onClick)
+		return b
+	end
+
+	----------------------------------------------------------------- language
+	-- One flag per language in the header, left of the window buttons.
+	-- Deliberately not a dropdown: one click has to be enough, and a menu would
+	-- need a label, which would itself need translating before anyone can read it.
+	--
+	-- The strip is SIZED FROM UI.LANGS rather than from a constant (FLAG_STEP and
+	-- flagWidth are computed with the rest of the right-hand block above). It was
+	-- 66px for three flags, and adding Filipino as a fourth pushed the last chip
+	-- out from under its own parent - the flag was there, just not clickable.
+	local flagStrip = frame(head, UDim2.fromOffset(flagWidth, 38),
+		UDim2.new(1, -52 - flagWidth, 0, 0), UI.theme.header, 1)
+	flagStrip.ZIndex = 3
+	local flagChips = {}
+
+	-- The chip is either an ImageLabel or a TextLabel, and TweenService throws on
+	-- a property the instance does not have - so each chip carries its own fade
+	-- rather than the loop guessing which one it got.
+	local function paintFlags()
+		for code, chip in pairs(flagChips) do
+			local on = (code == UI.lang)
+			chip.fade(on and 0 or 0.55)
+			tween(chip.edge, EASE.quick, {
+				Color = on and UI.theme.accent or UI.theme.band,
+				Transparency = on and 0 or 0.4,
+			})
+		end
+	end
+
+	for i, code in ipairs(UI.LANGS) do
+		local chip = Instance.new("TextButton")
+		chip.Size = UDim2.fromOffset(19, 14)
+		chip.Position = UDim2.fromOffset((i - 1) * FLAG_STEP, 12)
+		chip.BackgroundColor3 = UI.theme.input
+		chip.BackgroundTransparency = 0.35
+		chip.BorderSizePixel = 0
+		chip.Text = ""
+		chip.AutoButtonColor = false
+		chip.ZIndex = 3
+		chip.Parent = flagStrip
+		corner(chip, 3)
+		local edge = stroke(chip, UI.theme.band, 0.4)
+
+		-- The image if it is reachable, the two letters if it is not. A panel
+		-- must never lose its language switch because a PNG did not download.
+		local fade
+		local flagId = UI.flag(code)
+		if flagId then
+			local art = Instance.new("ImageLabel")
+			art.BackgroundTransparency = 1
+			art.Image = flagId
+			art.ScaleType = Enum.ScaleType.Crop
+			art.Size = UDim2.fromScale(1, 1)
+			art.ZIndex = 4
+			art.Parent = chip
+			corner(art, 3)
+			fade = function(a) tween(art, EASE.quick, { ImageTransparency = a }) end
+		else
+			-- The two letters are NOT translated: "DE" has to stay "DE" in every
+			-- language or the switch stops being a switch.
+			local art = Instance.new("TextLabel")
+			art.BackgroundTransparency = 1
+			art.Text = string.upper(code)
+			art.TextSize = 9
+			art.Font = UI.font.heading
+			art.TextColor3 = UI.theme.textSoft
+			art.Size = UDim2.fromScale(1, 1)
+			art.ZIndex = 4
+			art.Parent = chip
+			fade = function(a) tween(art, EASE.quick, { TextTransparency = a }) end
+		end
+		flagChips[code] = { chip = chip, fade = fade, edge = edge }
+
+		chip.MouseEnter:Connect(function()
+			if code ~= UI.lang then fade(0.15) end
+		end)
+		chip.MouseLeave:Connect(paintFlags)
+		chip.MouseButton1Click:Connect(function()
+			if UI.setLang(code) then paintFlags() end
+		end)
+	end
+	paintFlags()
+	window.paintFlags = paintFlags
+	-- A switch in one panel has to move every panel that is open, so the window
+	-- registers itself and UI.setLang calls back into it.
+	window.onLang = paintFlags
+	liveWindows[window] = true
+
+	----------------------------------------------------------------- scale
+	-- Recentres as well as resizes: with AnchorPoint (0,0) a UIScale shrinks the
+	-- panel towards its top-left corner, so a scaled window left at the old
+	-- position sits high and to the left of centre instead of in the middle.
+	function window.applyScale(value)
+		local s = value or UI.scaleFor(width, height)
+		rootScale.Scale = s
+		root.Position = UDim2.new(0.5, -(width * s) / 2, 0.5, -(height * s) / 2)
+		window.scale = s
+		return s
+	end
+	liveScales[window] = true
+	window.applyScale()
+	-- A phone has no RightShift, so the hotkey below cannot bring a hidden panel
+	-- back. The pill does, and it only exists where it is needed.
+	local reopen = Instance.new("TextButton")
+	reopen.Name = "XYUREI X-FLOIDReopen"
+	reopen.Size = UDim2.fromOffset(74, 30)
+	reopen.Position = UDim2.new(0, 12, 0, 12)
+	reopen.BackgroundColor3 = UI.theme.accent
+	reopen.BorderSizePixel = 0
+	reopen.Text = ""
+	reopen.AutoButtonColor = false
+	reopen.Visible = false
+	reopen.Active = true
+	reopen.Draggable = true
+	reopen.ZIndex = 50
+	reopen.Parent = gui
+	corner(reopen, 9)
+	local reopenText = label(reopen, UI.BRAND, 12, UI.font.heading, UI.theme.window)
+	reopenText.Size = UDim2.fromScale(1, 1)
+	reopenText.TextXAlignment = Enum.TextXAlignment.Center
+	reopenText.ZIndex = 51
+	reopen.MouseButton1Click:Connect(function()
+		root.Visible = true
+		reopen.Visible = false
+	end)
+	window.reopen = reopen
+	root:GetPropertyChangedSignal("Visible"):Connect(function()
+		reopen.Visible = (not root.Visible) and UI.device == "mobile"
+	end)
+
+	----------------------------------------------------------------- status strip
+	local strip = frame(content, UDim2.new(1, 0, 0, 52), UDim2.fromOffset(0, 38), UI.theme.accent, 0.95)
+	strip.ZIndex = 2
+	hairline(strip, 0, UI.theme.edge).Position = UDim2.new(0, 0, 1, -1)
+	window.strip = strip
+
+	local stripToggle = frame(strip, UDim2.fromOffset(34, 19), UDim2.fromOffset(15, 17), UI.theme.band)
+	stripToggle.ZIndex = 3
+	corner(stripToggle, 10)
+	local stripKnob = frame(stripToggle, UDim2.fromOffset(13, 13), UDim2.fromOffset(3, 3),
+		UI.theme.fainter)
+	stripKnob.ZIndex = 4
+	corner(stripKnob, 7)
+	local stripHit = Instance.new("TextButton")
+	stripHit.Size = UDim2.fromScale(1, 1)
+	stripHit.BackgroundTransparency = 1
+	stripHit.Text = ""
+	stripHit.ZIndex = 5
+	stripHit.Parent = stripToggle
+
+	local stripTitle = label(strip, "Bereit", 14, UI.font.heading, UI.theme.text)
+	stripTitle.Position = UDim2.fromOffset(63, 12)
+	stripTitle.Size = UDim2.fromOffset(240, 14)
+	stripTitle.ZIndex = 3
+	window.stripTitle = stripTitle
+
+	local stripSub = label(strip, options.subtitle or "", 11, UI.font.mono, UI.theme.dimmer)
+	stripSub.Position = UDim2.fromOffset(63, 28)
+	stripSub.Size = UDim2.fromOffset(300, 12)
+	stripSub.ZIndex = 3
+	window.stripSub = stripSub
+
+	-- three stat columns on the right
+	local stats = {}
+	local statHolder = frame(strip, UDim2.fromOffset(240, 52), UDim2.new(1, -255, 0, 0),
+		UI.theme.window, 1)
+	statHolder.ZIndex = 3
+	local statLayout = listLayout(statHolder, 20, Enum.FillDirection.Horizontal)
+	statLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	statLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	for i = 1, 3 do
+		local col = frame(statHolder, UDim2.fromOffset(70, 34), nil, UI.theme.window, 1)
+		col.LayoutOrder = i
+		col.ZIndex = 3
+		local value = label(col, "-", 15, UI.font.mono,
+			i == 2 and UI.theme.accentSoft or UI.theme.text)
+		value.Size = UDim2.new(1, 0, 0, 14)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		value.ZIndex = 4
+		local capt = label(col, "", 10, UI.font.body, UI.theme.dimmer)
+		capt.Position = UDim2.fromOffset(0, 18)
+		capt.Size = UDim2.new(1, 0, 0, 12)
+		capt.TextXAlignment = Enum.TextXAlignment.Right
+		capt.ZIndex = 4
+		stats[i] = { value = value, caption = capt }
+		UI.onSmall(capt, function()
+			capt.TextSize = UI.small(10, 8)
+		end)
+	end
+	window.stats = stats
+	UI.onSmall(stripSub, function()
+		stripSub.TextSize = UI.small(11, 9)
+	end)
+
+	----------------------------------------------------------------- pages
+	local body = frame(content, UDim2.new(1, 0, 1, -38 - 52 - 50 - 22), UDim2.fromOffset(0, 90),
+		UI.theme.window)
+	body.ClipsDescendants = true
+	body.ZIndex = 1
+	window.body = body
+
+	----------------------------------------------------------------- discord bar
+	local discord = Instance.new("TextButton")
+	discord.Size = UDim2.new(1, 0, 0, 50)
+	discord.Position = UDim2.new(0, 0, 1, -72)
+	discord.BackgroundColor3 = UI.theme.discord
+	discord.BorderSizePixel = 0
+	discord.Text = ""
+	discord.AutoButtonColor = false
+	discord.ZIndex = 2
+	discord.Parent = content
+	local discordGrad = Instance.new("UIGradient")
+	discordGrad.Color = ColorSequence.new(UI.theme.discord, UI.theme.discordAlt)
+	discordGrad.Parent = discord
+
+	-- The real Discord mark, not a filled circle standing in for one. Workspace
+	-- copy first (that is where bridge.py mirrors brand/icons/), then the repo -
+	-- somebody who only ran the loader has no workspace copy of anything, and this
+	-- icon is the whole point of the bar it sits on. A text glyph remains the last
+	-- resort so the bar can never end up blank.
+	local dIcon
+	local dIconId = UI.image("icons/XYUREI X-FLOID-discord.png")
+		or UI.imageFromUrl(UI.RAW .. "icons/discord.png", "XYUREI X-FLOID-cache/discord.png")
+	if dIconId then
+		dIcon = Instance.new("ImageLabel")
+		dIcon.BackgroundTransparency = 1
+		dIcon.Image = dIconId
+		dIcon.ImageColor3 = Color3.new(1, 1, 1)
+		dIcon.ScaleType = Enum.ScaleType.Fit
+		dIcon.Size = UDim2.fromOffset(24, 24)
+		dIcon.Position = UDim2.fromOffset(15, 13)
+		dIcon.ZIndex = 3
+		dIcon.Parent = discord
+	else
+		dIcon = label(discord, "◉", 20, UI.font.heading, Color3.new(1, 1, 1))
+		dIcon.Position = UDim2.fromOffset(15, 0)
+		dIcon.Size = UDim2.fromOffset(24, 50)
+		dIcon.TextXAlignment = Enum.TextXAlignment.Center
+		dIcon.ZIndex = 3
+	end
+
+	local dTitle = label(discord, "DISCORD BEITRETEN", 13, UI.font.heading, Color3.new(1, 1, 1))
+	dTitle.Position = UDim2.fromOffset(52, 11)
+	dTitle.Size = UDim2.fromOffset(300, 14)
+	dTitle.ZIndex = 3
+
+	local dSub = label(discord, "Codes, Updates & Support", 10, UI.font.body,
+		Color3.new(1, 1, 1), 0.25)
+	dSub.Position = UDim2.fromOffset(52, 28)
+	dSub.Size = UDim2.fromOffset(300, 12)
+	dSub.ZIndex = 3
+
+	local dPill = frame(discord, UDim2.fromOffset(62, 26), UDim2.new(1, -77, 0, 12),
+		Color3.new(1, 1, 1), 0.84)
+	dPill.ZIndex = 3
+	corner(dPill, 7)
+	local dPillText = label(dPill, "JOIN →", 11, UI.font.heading, Color3.new(1, 1, 1))
+	dPillText.Size = UDim2.fromScale(1, 1)
+	dPillText.TextXAlignment = Enum.TextXAlignment.Center
+	dPillText.ZIndex = 4
+	UI.onSmall(dSub, function()
+		dSub.TextSize = UI.small(10, 8)
+	end)
+
+	discord.MouseEnter:Connect(function()
+		tween(discord, EASE.soft, { BackgroundColor3 = UI.theme.accentAlt })
+	end)
+	discord.MouseLeave:Connect(function()
+		tween(discord, EASE.soft, { BackgroundColor3 = UI.theme.discord })
+	end)
+	discord.MouseButton1Click:Connect(function()
+		press(discord)
+		-- UI.openUrl tries every opener an executor might have before it settles
+		-- for the clipboard, so the normal case is a browser tab rather than a
+		-- copied string the user then has to paste somewhere themselves.
+		local how = UI.openUrl("https://" .. UI.DISCORD)
+		if how == "browser" then
+			setText(dTitle, "IM BROWSER GEÖFFNET")
+		elseif how == "clipboard" then
+			setText(dTitle, "LINK KOPIERT")
+		else
+			setText(dTitle, UI.DISCORD)
+		end
+		task.delay(2.5, function() setText(dTitle, "DISCORD BEITRETEN") end)
+	end)
+
+	----------------------------------------------------------------- footer
+	local foot = frame(content, UDim2.new(1, 0, 0, 22), UDim2.new(0, 0, 1, -22), UI.theme.window)
+	foot.ZIndex = 2
+	local footText = label(foot, UI.DISCORD .. "  ·  XYUREI X-FLOID v" .. UI.VERSION, 10,
+		UI.font.mono, UI.theme.fainter)
+	footText.Size = UDim2.fromScale(1, 1)
+	footText.TextXAlignment = Enum.TextXAlignment.Center
+	footText.ZIndex = 3
+	window.footText = footText
+	UI.onSmall(footText, function()
+		footText.TextSize = UI.small(10, 8)
+	end)
+
+	----------------------------------------------------------------- state
+	window.pages = {}
+	window.current = nil
+	window.chips = {}      -- toggle bookkeeping, keyed by a counter (see v2 note)
+	window.chipSeq = 0
+	window.collapsed = false
+
+	-- Collapsing has to HIDE the lower furniture, not just shrink the window. The
+	-- Discord bar and the footer are anchored to the bottom of the content frame,
+	-- so shrinking alone slid both of them straight over the header and the strip
+	-- - the collapsed panel was a blue block with the title behind it.
+	headButton("–", -46, function()
+		window.collapsed = not window.collapsed
+		local target = window.collapsed and 90 or height
+		if window.collapsed then
+			body.Visible = false
+			discord.Visible = false
+			foot.Visible = false
+		else
+			-- back BEFORE the tween, so the panel does not open onto a blank area
+			body.Visible = true
+			discord.Visible = true
+			foot.Visible = true
+		end
+		tween(root, EASE.slow, { Size = UDim2.fromOffset(width, target) })
+	end)
+	-- On a phone × HIDES rather than destroys. There is no RightShift there, so a
+	-- destroyed panel is gone until the script is executed again - and × is
+	-- exactly the button somebody presses to get their screen back. Hiding puts
+	-- the pill up instead, which brings it straight back.
+	-- × CLOSES THE SCRIPT, not just the picture of it. window:Destroy() stays
+	-- GUI-only on purpose - every game script calls it on its own old window when
+	-- it is re-executed, and a Destroy that stopped scripts would have the fresh
+	-- run kill itself one line after starting. The stop belongs to the button.
+	headButton("×", -24, function()
+		if UI.device == "mobile" then
+			root.Visible = false
+		else
+			window:Destroy()
+			pcall(UI.stopScript)
+		end
+	end)
+
+	--------------------------------------------------------------- master toggle
+	--
+	-- SetMaster / SetStat are v3-only, so the nineteen scripts written against v1
+	-- never call them. Left visible they render as a dead grey switch and three
+	-- "-" columns next to a panel that is plainly running, which reads as broken
+	-- UI. So both start HIDDEN and appear the first time a script actually uses
+	-- them; the title slides left to take the space back.
+	stripToggle.Visible = false
+	stripTitle.Position = UDim2.fromOffset(15, 12)
+	stripSub.Position = UDim2.fromOffset(15, 30)
+	statHolder.Visible = false
+
+	local masterState, masterCb = false, nil
+	function window:SetMaster(on, caption, sub)
+		if not stripToggle.Visible then
+			stripToggle.Visible = true
+			stripTitle.Position = UDim2.fromOffset(63, 12)
+			stripSub.Position = UDim2.fromOffset(63, 30)
+		end
+		masterState = on and true or false
+		tween(stripToggle, EASE.soft, {
+			BackgroundColor3 = masterState and UI.theme.accent or UI.theme.band })
+		tween(stripKnob, EASE.snap, {
+			Position = UDim2.fromOffset(masterState and 18 or 3, 3),
+			BackgroundColor3 = masterState and UI.theme.window or UI.theme.fainter })
+		if caption then setText(stripTitle, caption) end
+		if sub then setText(stripSub, sub) end
+	end
+
+	function window:OnMaster(fn) masterCb = fn end
+
+	stripHit.MouseButton1Click:Connect(function()
+		window:SetMaster(not masterState)
+		if masterCb then task.spawn(masterCb, masterState) end
+	end)
+
+	--------------------------------------------------------------- public bits
+	-- SetStatus keeps its v1 meaning - the live line of numbers - but it now
+	-- writes the status strip's sub line, which is where the eye goes.
+	function window:SetStatus(text)
+		setText(stripSub, text)
+		setText(headSub, options.subtitle)
+	end
+
+	function window:SetStat(index, value, caption)
+		local s = stats[index]
+		if not s then return end
+		statHolder.Visible = true
+		s.value.Text = tostring(value)
+		if caption then setText(s.caption, caption) end
+	end
+
+	function window:SetNote(text) setText(stripTitle, text) end
+
+	function window:Destroy()
+		if pulseConn then pulseConn:Disconnect() pulseConn = nil end
+		gui:Destroy()
+	end
+
+	-- Recount the toggles that are on, for the header's "N aktiv".
+	function window:Refresh()
+		local on, total = 0, 0
+		for _, entry in pairs(self.chips) do
+			total = total + 1
+			if entry.on then on = on + 1 end
+		end
+		setFmt(activeCount, "%s aktiv", on)
+		for _, page in ipairs(self.pages) do
+			for _, card in ipairs(page.cards) do
+				if card.countLabel then
+					local c, t = 0, 0
+					for _, e in ipairs(card.toggles) do
+						t = t + 1
+						if e.on then c = c + 1 end
+					end
+					if t > 0 then setFmt(card.countLabel, "%s / %s an", c, t)
+					else setText(card.countLabel, "") end
+				end
+			end
+		end
+	end
+
+	--------------------------------------------------------------- page switch
+	local function show(page)
+		if window.current == page then return end
+		if window.current then window.current.holder.Visible = false end
+		-- The report card lives on Home, so "which page were you on" is the page
+		-- visited BEFORE Home, not Home itself. Remembered here for the report.
+		if window.current then window.lastPage = window.current end
+		window.current = page
+		page.holder.Visible = true
+		setText(pageName, page.name)
+		for _, p in ipairs(window.pages) do
+			local active = p == page
+			tween(p.railButton, EASE.quick, {
+				BackgroundTransparency = active and 0.92 or 1 })
+			p.tintIcon(active and UI.theme.accentAlt or UI.theme.dimmer)
+			p.railMark.BackgroundTransparency = active and 0 or 1
+		end
+		-- Pages fade and lift; they never slide sideways. Sideways motion on a
+		-- two-column grid looks like the layout is being rebuilt.
+		local i = 0
+		for _, card in ipairs(page.cards) do
+			rise(card.root, i * 0.05)
+			i = i + 1
+		end
+		page:Fill()
+	end
+	window.show = show
+
+	--------------------------------------------------------------- Page
+	function window:Page(name, iconGlyph)
+		local page = { name = name, cards = {}, window = self }
+
+		-- A SCROLLING page, not a fixed one. v3 first tried to make everything fit
+		-- by shrinking the grid to whatever the full-width card left over - and
+		-- with a 14-line read-out that left the two columns ~160px, so the cards
+		-- were clipped mid-row and the read-out looked like it was lying on top of
+		-- the options. Nothing may ever be squeezed or covered: the content takes
+		-- the height it needs and the page scrolls if that is more than fits.
+		page.holder = Instance.new("ScrollingFrame")
+		page.holder.Size = UDim2.fromScale(1, 1)
+		page.holder.BackgroundTransparency = 1
+		page.holder.BorderSizePixel = 0
+		page.holder.Visible = false
+		page.holder.ZIndex = 1
+		-- Wide enough to notice. At 3px and 40% transparent the bar was invisible
+		-- against the panel, so a page with 788px of content in a 418px viewport
+		-- read as "half the options are missing" rather than "scroll down".
+		page.holder.ScrollBarThickness = 6
+		page.holder.ScrollBarImageColor3 = UI.theme.accent
+		page.holder.ScrollBarImageTransparency = 0.15
+		page.holder.CanvasSize = UDim2.new()
+		page.holder.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		page.holder.ScrollingDirection = Enum.ScrollingDirection.Y
+		page.holder.ElasticBehavior = Enum.ElasticBehavior.Never
+		page.holder.Parent = body
+
+		-- The grid and the full-width strip are STACKED, never both anchored at
+		-- y=12. v3 shipped them at the same offset for one build and the wide
+		-- card (Card(name, 0), which every script uses for its read-out) drew
+		-- straight on top of the two columns. A vertical list layout makes the
+		-- order structural instead of arithmetic.
+		local stack = frame(page.holder, UDim2.new(1, 0, 0, 0), nil, UI.theme.window, 1)
+		stack.AutomaticSize = Enum.AutomaticSize.Y
+		stack.ZIndex = 1
+		pad(stack, 15, 18, 12, 12)
+		listLayout(stack, 12)
+		page.stack = stack
+
+		-- two hand-built columns, never a UIGridLayout: a grid pins every cell to
+		-- one size, which fights AutomaticSize and clipped every card in v1.
+		-- Grid and columns size themselves to their content. Nothing is given a
+		-- height it has to squeeze into, so a card can never be clipped and the
+		-- full-width card below can never land on top of one.
+		local grid = frame(stack, UDim2.new(1, 0, 0, 0), nil, UI.theme.window, 1)
+		grid.AutomaticSize = Enum.AutomaticSize.Y
+		grid.LayoutOrder = 1
+		grid.ZIndex = 1
+		page.grid = grid
+
+		local colWidth = UDim2.new(0.5, -6, 0, 0)
+		page.columns = {}
+		for i = 1, 2 do
+			local col = frame(grid, colWidth, UDim2.new(0.5 * (i - 1), (i - 1) * 6, 0, 0),
+				UI.theme.window, 1)
+			col.AutomaticSize = Enum.AutomaticSize.Y
+			col.ZIndex = 1
+			listLayout(col, 12)
+			page.columns[i] = col
+		end
+
+		-- full-width strip UNDER the grid, for wide content (read-outs)
+		page.wide = frame(stack, UDim2.new(1, 0, 0, 0), nil, UI.theme.window, 1)
+		page.wide.AutomaticSize = Enum.AutomaticSize.Y
+		page.wide.LayoutOrder = 2
+		page.wide.ZIndex = 1
+		listLayout(page.wide, 12)
+
+		-- The mockup's lower block in each column is flex:1 - it eats whatever
+		-- height is left, so the grid always reaches the bottom edge. Roblox has
+		-- no flex, and without this the panel sits with a dead strip between the
+		-- last card and the Discord bar, which reads as "the panel failed to
+		-- load the rest". So: measure what the column actually used and stretch
+		-- the last card by the difference.
+		--
+		-- It has to run in a task.defer. The cards were only just made visible,
+		-- so AbsoluteSize is still last frame's and the sum comes out short.
+		-- Only ever GROWS a card, never shrinks one. When the page is shorter than
+		-- the viewport the shorter column's last card takes up the slack so the
+		-- grid reaches the bottom edge like the mockup; when the page is longer,
+		-- this does nothing at all and the page simply scrolls. The earlier
+		-- version forced a height on the grid, which is what clipped the cards.
+		--
+		-- It has to run in a task.defer: the cards were only just made visible, so
+		-- AbsoluteSize is still last frame's and every sum comes out short.
+		function page:Fill()
+			task.defer(function()
+				if not self.holder.Parent then return end
+				local viewport = body.AbsoluteSize.Y
+				local content = self.stack.AbsoluteSize.Y
+				local heights = {}
+				for i, col in ipairs(self.columns) do
+					local used, last = 0, nil
+					for _, child in ipairs(col:GetChildren()) do
+						if child:IsA("Frame") and child.Name ~= "__fill" then
+							used = used + child.AbsoluteSize.Y + 12
+							if not last or child.LayoutOrder >= last.LayoutOrder then
+								last = child
+							end
+						end
+					end
+					heights[i] = { used = math.max(0, used - 12), last = last }
+				end
+				local tallest = math.max(heights[1].used, heights[2].used)
+				-- if the whole page already overflows, no filling - just scroll
+				local slackPage = viewport - content
+				for _, h in ipairs(heights) do
+					if h.last then
+						local inner3 = h.last:FindFirstChildOfClass("Frame")
+						local spacer = inner3 and inner3:FindFirstChild("__fill")
+						local want = (tallest - h.used) + math.max(0, slackPage)
+						if want > 2 and inner3 then
+							if not spacer then
+								spacer = frame(inner3, UDim2.new(1, 0, 0, 0), nil,
+									UI.theme.card, 1)
+								spacer.Name = "__fill"
+								spacer.LayoutOrder = 99
+								spacer.ZIndex = 2
+							end
+							spacer.Size = UDim2.new(1, 0, 0, want)
+						elseif spacer then
+							spacer:Destroy()
+						end
+					end
+				end
+			end)
+		end
+
+		-- rail button
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.fromOffset(30, 30)
+		btn.BackgroundColor3 = Color3.new(1, 1, 1)
+		btn.BackgroundTransparency = 1
+		btn.BorderSizePixel = 0
+		btn.Text = ""
+		btn.AutoButtonColor = false
+		btn.LayoutOrder = #self.pages + 1
+		btn.ZIndex = 3
+		btn.Parent = railList
+		corner(btn, 9)
+		local icon, tintIcon = iconNode(btn, iconGlyph or UI.icon.grid, 16, UI.theme.dimmer)
+		icon.Position = UDim2.new(0.5, -8, 0.5, -8)
+		icon.ZIndex = 4
+		page.tintIcon = tintIcon
+		-- the active marker is an inset bar on the left, box-shadow:inset 2px 0 0
+		local mark = frame(btn, UDim2.fromOffset(2, 18), UDim2.fromOffset(-8, 6), UI.theme.accent, 1)
+		mark.ZIndex = 4
+		corner(mark, 1)
+		page.railButton, page.railIcon, page.railMark = btn, icon, mark
+
+		btn.MouseEnter:Connect(function()
+			if window.current ~= page then
+				tween(btn, EASE.quick, { BackgroundTransparency = 0.94 })
+			end
+		end)
+		btn.MouseLeave:Connect(function()
+			if window.current ~= page then
+				tween(btn, EASE.quick, { BackgroundTransparency = 1 })
+			end
+		end)
+		btn.MouseButton1Click:Connect(function() show(page) end)
+
+		------------------------------------------------------------ Card / block
+		function page:Card(caption, column)
+			local card = { toggles = {}, rows = {}, page = self }
+			local parent = (column == 0) and self.wide or self.columns[column or 1]
+
+			local root2 = frame(parent, UDim2.new(1, 0, 0, 0), nil, UI.theme.card)
+			root2.AutomaticSize = Enum.AutomaticSize.Y
+			root2.LayoutOrder = #parent:GetChildren()
+			root2.ZIndex = 2
+			corner(root2, 9)
+			stroke(root2, UI.theme.band, 0)
+			root2.ClipsDescendants = true
+			card.root = root2
+
+			local inner = frame(root2, UDim2.new(1, 0, 0, 0), nil, UI.theme.card, 1)
+			inner.AutomaticSize = Enum.AutomaticSize.Y
+			inner.ZIndex = 2
+			listLayout(inner, 0)
+
+			-- header band
+			local band = frame(inner, UDim2.new(1, 0, 0, 30), nil, Color3.new(1, 1, 1), 0.965)
+			band.LayoutOrder = 0
+			band.ZIndex = 3
+			local bandIcon, tintBand = iconNode(band, UI.icon.grid, 13, UI.theme.dim)
+			bandIcon.Position = UDim2.fromOffset(11, 9)
+			bandIcon.ZIndex = 4
+			-- GothamBold, not the mono font. The mockup sets these in IBM Plex Mono
+			-- and Roblox's stand-in for that is Enum.Font.Code, which at 10px
+			-- uppercase comes out thin and smeared - "LOOP" and "PROGRESSION" were
+			-- the two that made it obvious. Mono stays where it belongs: numbers.
+			local bandText = label(band, string.upper(caption or ""), 11, UI.font.heading,
+				UI.theme.muted)
+			bandText.Position = UDim2.fromOffset(29, 0)
+			bandText.Size = UDim2.new(1, -100, 0, 30)
+			bandText.ZIndex = 4
+			local countLabel = label(band, "", 10, UI.font.mono, UI.theme.dimmer)
+			countLabel.Position = UDim2.new(1, -75, 0, 0)
+			countLabel.Size = UDim2.fromOffset(64, 30)
+			countLabel.TextXAlignment = Enum.TextXAlignment.Right
+			countLabel.ZIndex = 4
+			hairline(band, 0, UI.theme.band).Position = UDim2.new(0, 0, 1, -1)
+			card.band, card.bandIcon, card.countLabel = band, bandIcon, countLabel
+			UI.onSmall(bandText, function()
+				bandText.TextSize = UI.small(11, 9)
+				countLabel.TextSize = UI.small(10, 8)
+			end)
+
+			local rows = frame(inner, UDim2.new(1, 0, 0, 0), nil, UI.theme.card, 1)
+			rows.AutomaticSize = Enum.AutomaticSize.Y
+			rows.LayoutOrder = 1
+			rows.ZIndex = 3
+			listLayout(rows, 0)
+			card.rowHolder = rows
+
+			-- Accent the band when the card is the primary one on the page.
+			function card:Accent()
+				band.BackgroundColor3 = UI.theme.accent
+				band.BackgroundTransparency = 0.9
+				tintBand(UI.theme.accentAlt)
+				bandText.TextColor3 = UI.theme.accentSoft
+				countLabel.TextColor3 = UI.theme.dim
+				return self
+			end
+
+			function card:Icon(glyph)
+				local colour = bandIcon:IsA("ImageLabel") and bandIcon.ImageColor3
+					or bandIcon.TextColor3
+				bandIcon:Destroy()
+				bandIcon, tintBand = iconNode(band, glyph, 13, colour)
+				bandIcon.Position = UDim2.fromOffset(11, 9)
+				bandIcon.ZIndex = 4
+				card.bandIcon = bandIcon
+				return self
+			end
+
+			-- A row: title + hint on the left, control anchored to the TITLE LINE.
+			-- With a two-line hint under it a vertically centred control drifts
+			-- down into the hint and stops lining up with the thing it belongs to.
+			local function row(caption2, hint, controlWidth)
+				if #card.rows > 0 then
+					local sep = frame(rows, UDim2.new(1, -22, 0, 1), nil, UI.theme.line)
+					sep.LayoutOrder = #rows:GetChildren()
+					sep.ZIndex = 3
+					local sp = Instance.new("UIPadding")
+					sp.PaddingLeft = UDim.new(0, 11)
+					sp.Parent = sep
+				end
+				local r = frame(rows, UDim2.new(1, 0, 0, 0), nil, UI.theme.card, 1)
+				r.AutomaticSize = Enum.AutomaticSize.Y
+				r.LayoutOrder = #rows:GetChildren()
+				r.ZIndex = 3
+
+				local inner2 = frame(r, UDim2.new(1, -22, 0, 0), UDim2.fromOffset(11, 9),
+					UI.theme.card, 1)
+				inner2.AutomaticSize = Enum.AutomaticSize.Y
+				inner2.ZIndex = 3
+				local pb = Instance.new("UIPadding")
+				pb.PaddingBottom = UDim.new(0, 9)
+				pb.Parent = inner2
+
+				local title = label(inner2, caption2 or "", 12, UI.font.body, UI.theme.textSoft)
+				title.Size = UDim2.new(1, -(controlWidth or 40), 0, 14)
+				title.ZIndex = 4
+
+				local hintLabel
+				if hint and hint ~= "" then
+					-- The hint gets the FULL card width and wraps. Giving it the same
+					-- -120 the caption reserves left it ~125px inside a two-column
+					-- card and every hint longer than four words was truncated.
+					hintLabel = label(inner2, hint, 10, UI.font.body, UI.theme.dimmer)
+					hintLabel.Position = UDim2.fromOffset(0, 17)
+					hintLabel.Size = UDim2.new(1, 0, 0, 0)
+					hintLabel.AutomaticSize = Enum.AutomaticSize.Y
+					hintLabel.TextWrapped = true
+					hintLabel.TextYAlignment = Enum.TextYAlignment.Top
+					hintLabel.ZIndex = 4
+				end
+
+				-- The caption line and the hint under it, re-derived whenever the
+				-- device changes. The caption's height and the hint's offset are
+				-- computed from the caption size rather than hardcoded at 14 and 17,
+				-- or a floored caption would print straight through its own hint.
+				UI.onSmall(title, function()
+					local cap = UI.small(12, 10)
+					title.TextSize = cap
+					title.Size = UDim2.new(1, -(controlWidth or 40), 0, cap + 2)
+					if hintLabel then
+						hintLabel.TextSize = UI.small(10, 8)
+						hintLabel.Position = UDim2.fromOffset(0, cap + 5)
+					end
+				end)
+
+				-- The hover/click surface is a TextButton behind the labels, not the
+				-- row Frame: a Frame has no MouseEnter at all and assigning one
+				-- throws rather than being ignored.
+				local hover = Instance.new("TextButton")
+				hover.Size = UDim2.fromScale(1, 1)
+				hover.BackgroundColor3 = Color3.new(1, 1, 1)
+				hover.BackgroundTransparency = 1
+				hover.BorderSizePixel = 0
+				hover.Text = ""
+				hover.AutoButtonColor = false
+				-- UNTER dem Inhalt, nicht darueber. Der ScreenGui laeuft mit
+				-- ZIndexBehavior.Sibling, also entscheidet bei gleichem ZIndex die
+				-- Reihenfolge - und hover wird nach r.inner erzeugt, lag also oben
+				-- und fing jeden Klick ab. Toggles funktionierten trotzdem, weil die
+				-- genau diese Flaeche benutzen; Dropdown, Stepper und Slider haben
+				-- eigene Buttons und bekamen nie ein Ereignis. Ein transparenter
+				-- Frame schluckt in Roblox keine Eingaben, also erreicht der Klick
+				-- hover weiterhin ueberall dort, wo kein Bedienelement liegt.
+				hover.ZIndex = 1
+				hover.Parent = r
+				hover.MouseEnter:Connect(function()
+					tween(hover, EASE.quick, { BackgroundTransparency = 0.965 })
+				end)
+				hover.MouseLeave:Connect(function()
+					tween(hover, EASE.quick, { BackgroundTransparency = 1 })
+				end)
+
+				local entry = { root = r, inner = inner2, title = title, hint = hintLabel,
+				                hover = hover, caption = caption2 or "" }
+				table.insert(card.rows, entry)
+				return entry
+			end
+			card.row = row
+
+			---------------------------------------------------------- Toggle
+			function card:Toggle(caption2, initial, callback, hint, colour)
+				local r = row(caption2, hint, 46)
+				local state = initial and true or false
+
+				local track = frame(r.inner, UDim2.fromOffset(34, 19),
+					UDim2.new(1, -34, 0, -2), UI.theme.band)
+				track.ZIndex = 5
+				corner(track, 10)
+				local knob = frame(track, UDim2.fromOffset(13, 13), UDim2.fromOffset(3, 3),
+					UI.theme.fainter)
+				knob.ZIndex = 6
+				corner(knob, 7)
+
+				-- ONE accent, always. Scripts pass UI.theme.warn for anything that
+				-- spends and UI.theme.bad for anything destructive, and v1/v2 painted
+				-- the switch in it - which put amber and rose toggles next to violet
+				-- ones and made the panel look like three different tools. The
+				-- mockup uses a single violet and that is the whole reason it reads
+				-- calmly. The colour argument is still accepted (nothing to change
+				-- in nineteen scripts) and is used for the row's meaning bar
+				-- instead, where it informs without shouting.
+				local onColour = UI.theme.accent
+				if colour and colour ~= UI.theme.accent then
+					local mark = frame(r.inner, UDim2.fromOffset(2, 12),
+						UDim2.fromOffset(-11, 1), colour)
+					mark.ZIndex = 5
+					corner(mark, 1)
+				end
+				window.chipSeq = window.chipSeq + 1
+				local key = window.chipSeq
+				local entry = { on = state, caption = caption2 }
+				window.chips[key] = entry
+				table.insert(card.toggles, entry)
+
+				local function paint(animate)
+					local info = animate and EASE.snap or TweenInfo.new(0)
+					tween(track, EASE.soft, {
+						BackgroundColor3 = state and onColour or UI.theme.band })
+					tween(knob, info, {
+						Position = UDim2.fromOffset(state and 18 or 3, 3),
+						BackgroundColor3 = state and UI.theme.window or UI.theme.fainter })
+					entry.on = state
+					window:Refresh()
+				end
+				paint(false)
+
+				r.hover.MouseButton1Click:Connect(function()
+					state = not state
+					paint(true)
+					if callback then task.spawn(callback, state) end
+				end)
+
+				return {
+					set = function(a, b)
+						local v = arg(a, b)
+						state = v and true or false
+						paint(true)
+					end,
+					get = function() return state end,
+				}
+			end
+
+			---------------------------------------------------------- Slider
+			function card:Slider(caption2, minValue, maxValue, initial, callback, hint)
+				local r = row(caption2, hint, 60)
+				local value = math.clamp(initial or minValue, minValue, maxValue)
+
+				local readout = label(r.inner, tostring(value), 11, UI.font.mono,
+					UI.theme.accentSoft)
+				readout.Position = UDim2.new(1, -58, 0, 0)
+				readout.Size = UDim2.fromOffset(58, 14)
+				readout.TextXAlignment = Enum.TextXAlignment.Right
+				readout.ZIndex = 5
+
+				local trackY = r.hint and 40 or 22
+				local track = frame(r.inner, UDim2.new(1, 0, 0, 3), UDim2.fromOffset(0, trackY),
+					UI.theme.band)
+				track.ZIndex = 5
+				corner(track, 2)
+				local fill = frame(track, UDim2.fromScale(0, 1), nil, UI.theme.accent)
+				fill.ZIndex = 6
+				corner(fill, 2)
+				local knob = frame(track, UDim2.fromOffset(11, 11), UDim2.new(0, -5, 0, -4),
+					UI.theme.textSoft)
+				knob.ZIndex = 7
+				corner(knob, 6)
+
+				local hit = Instance.new("TextButton")
+				hit.Size = UDim2.new(1, 0, 0, 18)
+				hit.Position = UDim2.fromOffset(0, -7)
+				hit.BackgroundTransparency = 1
+				hit.Text = ""
+				hit.ZIndex = 8
+				hit.Parent = track
+
+				local function apply(alpha, fire)
+					alpha = math.clamp(alpha, 0, 1)
+					value = math.floor(minValue + (maxValue - minValue) * alpha + 0.5)
+					local a = (value - minValue) / math.max(1, maxValue - minValue)
+					fill.Size = UDim2.fromScale(a, 1)
+					knob.Position = UDim2.new(a, -5, 0, -4)
+					readout.Text = tostring(value)
+					if fire and callback then task.spawn(callback, value) end
+				end
+				apply((value - minValue) / math.max(1, maxValue - minValue), false)
+
+				dragX(hit, track, function(a) apply(a, true) end)
+
+				return { set = function(a, b)
+					local v = arg(a, b)
+					if v then apply((v - minValue) / math.max(1, maxValue - minValue), false) end
+				end }
+			end
+
+			---------------------------------------------------------- Colour
+			--
+			-- A colour is one of the few settings a panel cannot express with the
+			-- controls above: a slider per channel is three rows for one value and
+			-- nobody thinks in RGB triples. This is a swatch that opens a small
+			-- picker underneath it - twelve presets for the common case and a hue
+			-- plus brightness slider for everything else.
+			--
+			-- Written against the SAME row/frame/corner helpers as the rest, so it
+			-- inherits the palette, the small-screen font pass and the language
+			-- switch without knowing about any of them.
+			--
+			-- The callback fires on every drag frame, not only on release: these
+			-- values drive things that are drawn live (chams, ESP boxes), and a
+			-- picker that only commits on mouse-up makes choosing a colour a
+			-- guessing game.
+			local PRESETS = {
+				Color3.fromRGB(255, 72, 88),   Color3.fromRGB(255, 138, 60),
+				Color3.fromRGB(255, 210, 90),  Color3.fromRGB(150, 230, 90),
+				Color3.fromRGB(90, 220, 120),  Color3.fromRGB(80, 220, 200),
+				Color3.fromRGB(80, 190, 255),  Color3.fromRGB(110, 130, 255),
+				Color3.fromRGB(170, 110, 255), Color3.fromRGB(255, 110, 210),
+				Color3.fromRGB(245, 245, 250), Color3.fromRGB(120, 128, 145),
+			}
+
+			function card:Colour(caption2, initial, callback, hint)
+				local r = row(caption2, hint, 30)
+				local value = initial or UI.theme.accent
+				local open = false
+
+				local swatch = Instance.new("TextButton")
+				swatch.Size = UDim2.fromOffset(52, 22)
+				swatch.Position = UDim2.new(1, -52, 0, -4)
+				swatch.BackgroundColor3 = value
+				swatch.BorderSizePixel = 0
+				swatch.Text = ""
+				swatch.AutoButtonColor = false
+				swatch.ZIndex = 6
+				swatch.Parent = r.inner
+				corner(swatch, 7)
+				stroke(swatch, UI.theme.band, 0)
+
+				local panel = frame(r.inner, UDim2.new(1, 0, 0, 96),
+					UDim2.fromOffset(0, 26), UI.theme.void)
+				panel.ZIndex = 5
+				panel.Visible = false
+				corner(panel, 8)
+				stroke(panel, UI.theme.band, 0)
+
+				local hue, sat, val = Color3.toHSV(value)
+
+				local function emit(fire)
+					value = Color3.fromHSV(hue, sat, val)
+					swatch.BackgroundColor3 = value
+					if fire and callback then task.spawn(callback, value) end
+				end
+
+				-- twelve preset chips, two rows of six
+				for i, preset in ipairs(PRESETS) do
+					local col = (i - 1) % 6
+					local rowN = math.floor((i - 1) / 6)
+					local chip = Instance.new("TextButton")
+					chip.Size = UDim2.fromOffset(20, 20)
+					chip.Position = UDim2.fromOffset(10 + col * 25, 10 + rowN * 25)
+					chip.BackgroundColor3 = preset
+					chip.BorderSizePixel = 0
+					chip.Text = ""
+					chip.AutoButtonColor = false
+					chip.ZIndex = 7
+					chip.Parent = panel
+					corner(chip, 6)
+					stroke(chip, UI.theme.band, 0.4)
+					chip.MouseButton1Click:Connect(function()
+						hue, sat, val = Color3.toHSV(preset)
+						emit(true)
+					end)
+				end
+
+				-- one draggable bar, used twice: hue across the spectrum and then
+				-- brightness of whatever hue is selected
+				local function bar(y, gradientFor, get, set)
+					local track = frame(panel, UDim2.new(1, -20, 0, 10),
+						UDim2.fromOffset(10, y), UI.theme.band)
+					track.ZIndex = 7
+					corner(track, 5)
+					local grad = Instance.new("UIGradient")
+					grad.Parent = track
+
+					local knob = frame(track, UDim2.fromOffset(6, 16),
+						UDim2.new(0, -3, 0, -3), UI.theme.textSoft)
+					knob.ZIndex = 9
+					corner(knob, 3)
+					stroke(knob, UI.theme.void, 0.3)
+
+					local hit = Instance.new("TextButton")
+					hit.Size = UDim2.new(1, 0, 0, 20)
+					hit.Position = UDim2.fromOffset(0, -5)
+					hit.BackgroundTransparency = 1
+					hit.Text = ""
+					hit.ZIndex = 10
+					hit.Parent = track
+
+					local function repaint()
+						grad.Color = gradientFor()
+						knob.Position = UDim2.new(math.clamp(get(), 0, 1), -3, 0, -3)
+					end
+
+					dragX(hit, track, function(a)
+						set(a)
+						emit(true)
+						repaint()
+					end, function() return panel.Visible end)
+					return repaint
+				end
+
+				local repaintHue, repaintVal
+
+				repaintHue = bar(62, function()
+					local keys = {}
+					for i = 0, 6 do
+						table.insert(keys, ColorSequenceKeypoint.new(i / 6,
+							Color3.fromHSV(i / 6, 1, 1)))
+					end
+					return ColorSequence.new(keys)
+				end, function() return hue end, function(v)
+					hue = v
+					if sat < 0.15 then sat = 1 end
+					if repaintVal then repaintVal() end
+				end)
+
+				repaintVal = bar(80, function()
+					return ColorSequence.new(Color3.fromHSV(hue, sat, 0.05),
+						Color3.fromHSV(hue, sat, 1))
+				end, function() return val end, function(v) val = math.max(v, 0.05) end)
+
+				repaintHue()
+				repaintVal()
+
+				swatch.MouseButton1Click:Connect(function()
+					open = not open
+					panel.Visible = open
+					r.inner.Size = UDim2.new(1, -22, 0, open and 126 or 30)
+					if open then repaintHue() repaintVal() end
+				end)
+
+				return {
+					set = function(a, b)
+						local v = arg(a, b)
+						if typeof(v) == "Color3" then
+							hue, sat, val = Color3.toHSV(v)
+							emit(false)
+							repaintHue() repaintVal()
+						end
+					end,
+					get = function() return value end,
+				}
+			end
+
+			---------------------------------------------------------- Stepper
+			function card:Stepper(caption2, getText, onStep, hint)
+				local r = row(caption2, hint, 92)
+
+				local function stepButton(text, x, dir)
+					local b = Instance.new("TextButton")
+					b.Size = UDim2.fromOffset(20, 20)
+					b.Position = UDim2.new(1, x, 0, -3)
+					b.BackgroundColor3 = UI.theme.input
+					b.BorderSizePixel = 0
+					setText(b, text)
+					b.TextSize = 12
+					b.Font = UI.font.heading
+					b.TextColor3 = UI.theme.muted
+					b.AutoButtonColor = false
+					b.ZIndex = 5
+					b.Parent = r.inner
+					corner(b, 6)
+					stroke(b, UI.theme.band, 0)
+					return b
+				end
+
+				-- The value gets its own centred chip between - and +, never glued
+				-- to the label, or a long value truncates. The chip WIDTH follows
+				-- the text: at a fixed 50px "smart ladder" rendered as "art ladde"
+				-- and "auto 1" lost its tail. It grows, and the two buttons and the
+				-- caption move out of its way - nothing else changes.
+				local chip = frame(r.inner, UDim2.fromOffset(50, 20), UDim2.new(1, -72, 0, -3),
+					UI.theme.input)
+				chip.ZIndex = 5
+				corner(chip, 6)
+				stroke(chip, UI.theme.band, 0)
+				local chipText = label(chip, "", 11, UI.font.mono, UI.theme.accentSoft)
+				chipText.Size = UDim2.fromScale(1, 1)
+				chipText.TextXAlignment = Enum.TextXAlignment.Center
+				chipText.ZIndex = 6
+
+				local minus = stepButton("−", -92, -1)
+				local plus = stepButton("+", -20, 1)
+
+				local CHIP_MIN, CHIP_MAX = 50, 190
+				local function refresh()
+					local ok, text = pcall(getText)
+					text = ok and tostring(text) or "-"
+					setText(chipText, text)
+					-- TextService:GetTextSize, never TextBounds: a label that has not
+					-- rendered yet reports zero on the first frame, and the chip
+					-- would collapse to its minimum on every rebuild.
+					local measured = TextService:GetTextSize(text, 11, UI.font.mono,
+						Vector2.new(1000, 100)).X
+					local width = math.clamp(math.ceil(measured) + 18, CHIP_MIN, CHIP_MAX)
+					chip.Size = UDim2.fromOffset(width, 20)
+					chip.Position = UDim2.new(1, -(width + 22), 0, -3)
+					minus.Position = UDim2.new(1, -(width + 44), 0, -3)
+					-- the caption gives up exactly what the controls now take
+					r.title.Size = UDim2.new(1, -(width + 52), 0, 14)
+				end
+				-- after the definition, never before it: a local is invisible above
+				-- the line that declares it, so calling refresh() earlier resolves
+				-- to a nil global and throws.
+				refresh()
+
+				local function bind(button, dir)
+					button.MouseButton1Click:Connect(function()
+						press(button, UI.theme.accent)
+						if onStep then pcall(onStep, dir) end
+						refresh()
+					end)
+					button.MouseEnter:Connect(function()
+						tween(button, EASE.quick, { BackgroundColor3 = UI.theme.cardHover })
+					end)
+					button.MouseLeave:Connect(function()
+						tween(button, EASE.quick, { BackgroundColor3 = UI.theme.input })
+					end)
+				end
+				bind(minus, -1)
+				bind(plus, 1)
+
+				return refresh
+			end
+
+			---------------------------------------------------------- Dropdown
+			function card:Dropdown(caption2, choices, initial, callback)
+				local r = row(caption2, nil, 100)
+				local value = initial or (choices and choices[1]) or ""
+
+				local box = Instance.new("TextButton")
+				box.Size = UDim2.fromOffset(96, 22)
+				box.Position = UDim2.new(1, -96, 0, -4)
+				box.BackgroundColor3 = UI.theme.input
+				box.BorderSizePixel = 0
+				box.Text = ""
+				box.AutoButtonColor = false
+				box.ZIndex = 5
+				box.Parent = r.inner
+				corner(box, 7)
+				stroke(box, UI.theme.band, 0)
+
+				local boxText = label(box, tostring(value), 11, UI.font.mono, UI.theme.accentSoft)
+				boxText.Position = UDim2.fromOffset(9, 0)
+				boxText.Size = UDim2.new(1, -24, 1, 0)
+				boxText.ZIndex = 6
+				-- ▼/▲, never ▾/▴: the small forms are tofu in Gotham.
+				local arrow = label(box, "▼", 8, UI.font.body, UI.theme.dimmer)
+				arrow.Position = UDim2.new(1, -18, 0, 0)
+				arrow.Size = UDim2.fromOffset(14, 22)
+				arrow.ZIndex = 6
+
+				-- The menu hangs off the WINDOW, not off the row. Every card sets
+				-- ClipsDescendants so its rounded corners hold, which cut the open
+				-- menu off after a few pixels - it looked like the dropdown simply
+				-- did nothing. Parented to the root it can overhang the card, and
+				-- its position is taken from the box on every open because the page
+				-- scrolls underneath it.
+				local menu = frame(root, UDim2.fromOffset(96, 0), UDim2.fromOffset(0, 0),
+					UI.theme.input)
+				menu.Visible = false
+				menu.ZIndex = 200
+				menu.AutomaticSize = Enum.AutomaticSize.Y
+				corner(menu, 7)
+				stroke(menu, UI.theme.band, 0)
+				listLayout(menu, 0)
+
+				for index, choice in ipairs(choices or {}) do
+					local item = Instance.new("TextButton")
+					item.Size = UDim2.new(1, 0, 0, 22)
+					item.BackgroundColor3 = UI.theme.input
+					item.BackgroundTransparency = 1
+					item.BorderSizePixel = 0
+					setText(item, "  " .. tostring(choice))
+					item.TextSize = 11
+					item.Font = UI.font.mono
+					item.TextColor3 = UI.theme.muted
+					item.TextXAlignment = Enum.TextXAlignment.Left
+					item.AutoButtonColor = false
+					item.LayoutOrder = index
+					item.ZIndex = 21
+					item.Parent = menu
+					item.MouseEnter:Connect(function()
+						tween(item, EASE.quick, { BackgroundTransparency = 0.9,
+							TextColor3 = UI.theme.accentSoft })
+					end)
+					item.MouseLeave:Connect(function()
+						tween(item, EASE.quick, { BackgroundTransparency = 1,
+							TextColor3 = UI.theme.muted })
+					end)
+					item.MouseButton1Click:Connect(function()
+						value = choice
+						setText(boxText, tostring(choice))
+						menu.Visible = false
+						if callback then task.spawn(callback, choice) end
+					end)
+				end
+
+				box.MouseButton1Click:Connect(function()
+					if not menu.Visible then
+						local at = box.AbsolutePosition - root.AbsolutePosition
+						menu.Position = UDim2.fromOffset(at.X, at.Y + box.AbsoluteSize.Y + 3)
+						menu.Size = UDim2.fromOffset(box.AbsoluteSize.X, 0)
+					end
+					menu.Visible = not menu.Visible
+					arrow.Text = menu.Visible and "▲" or "▼"
+				end)
+				-- a menu left open while the page scrolls would float in mid-air
+				page.holder:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+					menu.Visible = false
+					arrow.Text = "▼"
+				end)
+
+				return { set = function(a, b)
+					local v = arg(a, b)
+					if v ~= nil then value = v setText(boxText, tostring(v)) end
+				end }
+			end
+
+			---------------------------------------------------------- Button
+			function card:Button(caption2, callback, colour)
+				local r = row(nil, nil, 0)
+				r.inner.Size = UDim2.new(1, -22, 0, 32)
+				r.inner.AutomaticSize = Enum.AutomaticSize.None
+				r.title:Destroy()
+
+				local b = Instance.new("TextButton")
+				b.Size = UDim2.new(1, 0, 0, 32)
+				b.BackgroundColor3 = colour or UI.theme.accent
+				b.BorderSizePixel = 0
+				setText(b, string.upper(caption2 or ""))
+				b.TextSize = 11
+				b.Font = UI.font.heading
+				b.TextColor3 = (colour and colour ~= UI.theme.accent)
+					and Color3.new(1, 1, 1) or UI.theme.window
+				b.AutoButtonColor = false
+				b.ZIndex = 5
+				b.Parent = r.inner
+				corner(b, 8)
+
+				b.MouseEnter:Connect(function()
+					tween(b, EASE.soft, { Position = UDim2.fromOffset(0, -1) })
+				end)
+				b.MouseLeave:Connect(function()
+					tween(b, EASE.soft, { Position = UDim2.fromOffset(0, 0) })
+				end)
+				b.MouseButton1Click:Connect(function()
+					press(b)
+					if callback then task.spawn(callback) end
+				end)
+				return b
+			end
+
+			---------------------------------------------------------- Label
+			function card:Label(text)
+				local r = row(nil, nil, 0)
+				r.title:Destroy()
+				-- Gotham, nicht Code: die Mono-Schrift franst bei 10px sichtbar aus.
+				-- Mono bleibt Zahlen vorbehalten (Readout, Stepper, Statuszeile).
+				local l = label(r.inner, text or "", 11, UI.font.body, UI.theme.dimmer)
+				l.Size = UDim2.new(1, 0, 0, 0)
+				l.AutomaticSize = Enum.AutomaticSize.Y
+				l.TextWrapped = true
+				l.TextYAlignment = Enum.TextYAlignment.Top
+				l.ZIndex = 5
+				return {
+					set = function(a, b) setText(l, arg(a, b)) end,
+					label = l,
+				}
+			end
+
+			---------------------------------------------------------- Input
+			--
+			-- Added for the config share code and deliberately narrow: one line of
+			-- text with a placeholder, no validation, no submit handling. The
+			-- placeholder goes through setPlaceholder rather than being written
+			-- directly, or it freezes in whatever language it was born in.
+			function card:Input(placeholder, onChange)
+				local r = row(nil, nil, 0)
+				r.title:Destroy()
+				r.inner.Size = UDim2.new(1, -22, 0, 34)
+				r.inner.AutomaticSize = Enum.AutomaticSize.None
+
+				local box = frame(r.inner, UDim2.new(1, 0, 0, 34), nil, UI.theme.void)
+				box.ZIndex = 5
+				corner(box, 8)
+				stroke(box, UI.theme.band, 0)
+
+				local input = Instance.new("TextBox")
+				input.Size = UDim2.new(1, -20, 1, 0)
+				input.Position = UDim2.fromOffset(10, 0)
+				input.BackgroundTransparency = 1
+				input.ClearTextOnFocus = false
+				input.Text = ""
+				setPlaceholder(input, placeholder or "")
+				input.Font = UI.font.mono
+				input.TextSize = UI.small(11)
+				input.TextColor3 = UI.theme.text
+				input.PlaceholderColor3 = UI.theme.dimmer
+				input.TextXAlignment = Enum.TextXAlignment.Left
+				input.TextTruncate = Enum.TextTruncate.AtEnd
+				input.ZIndex = 6
+				input.Parent = box
+
+				if onChange then
+					input:GetPropertyChangedSignal("Text"):Connect(function()
+						task.spawn(onChange, input.Text)
+					end)
+				end
+				return {
+					get = function() return input.Text end,
+					set = function(a, b) input.Text = tostring(arg(a, b) or "") end,
+					box = input,
+				}
+			end
+
+			---------------------------------------------------------- Readout
+			function card:Readout(lines, colourFor)
+				local count = lines or 10
+				local height2 = count * 13 + 16
+				local r = row(nil, nil, 0)
+				r.title:Destroy()
+				r.inner.Size = UDim2.new(1, -22, 0, height2)
+				r.inner.AutomaticSize = Enum.AutomaticSize.None
+
+				local box = frame(r.inner, UDim2.new(1, 0, 0, height2), nil, UI.theme.void)
+				box.ZIndex = 5
+				corner(box, 7)
+				stroke(box, UI.theme.band, 0)
+				local holder = frame(box, UDim2.new(1, -20, 1, -14), UDim2.fromOffset(10, 7),
+					UI.theme.void, 1)
+				holder.ZIndex = 6
+				listLayout(holder, 1)
+
+				local rowLabels = {}
+				for i = 1, count do
+					local l = label(holder, "", 11, UI.font.mono, UI.theme.muted)
+					l.Size = UDim2.new(1, 0, 0, 12)
+					l.LayoutOrder = i
+					l.ZIndex = 7
+					rowLabels[i] = l
+				end
+
+				-- The read-out is the ONE place with a fixed height, so a floored
+				-- font has to grow the box with it - left at 13 per line the last
+				-- lines would simply be cut off inside the frame.
+				UI.onSmall(box, function()
+					local fs = UI.small(11, 8)
+					local lh = fs + 1
+					local h = count * (lh + 1) + 16
+					for _, l in ipairs(rowLabels) do
+						l.TextSize = fs
+						l.Size = UDim2.new(1, 0, 0, lh)
+					end
+					box.Size = UDim2.new(1, 0, 0, h)
+					r.inner.Size = UDim2.new(1, -22, 0, h)
+				end)
+
+				return {
+					-- Called as out:set(lines) by every script, so the table arrives
+					-- as the first argument and the list as the second. Written as
+					-- set(list) the whole read-out silently stayed blank - which is
+					-- exactly what v3 shipped with for one build. Accept both forms.
+					set = function(a, b)
+						local list = arg(a, b)
+						for i, l in ipairs(rowLabels) do
+							local text = list and list[i] or ""
+							setText(l, text)
+							-- ALL-CAPS lines render as accent headings, same as v1/v2.
+							local isHead = text ~= "" and text == string.upper(text)
+								and not text:match("^%s")
+							local colour = colourFor and colourFor(text) or nil
+							l.TextColor3 = colour or (isHead and UI.theme.accentSoft
+								or UI.theme.muted)
+						end
+					end,
+					labels = rowLabels,
+				}
+			end
+
+			table.insert(self.cards, card)
+			return card
+		end
+
+		table.insert(self.pages, page)
+		if not window.current then show(page) end
+		return page
+	end
+
+	--------------------------------------------------------------- SETTINGS
+	--
+	-- Its own page with a GEAR, pinned to the BOTTOM of the rail. It started as a
+	-- card on Home and that was wrong: settings are not something you flip past,
+	-- they are the one thing you go looking for, and bottom-left with a cog is
+	-- where every program in the world has taught people to look.
+	--
+	-- Built from window:Home, so no game script gained a line for it.
+	function window:Settings(options3)
+		options3 = options3 or {}
+		local record = UI.configCurrent
+		local page = self:Page(options3.name or "Einstellungen", UI.icon.gear)
+
+		-- Out of the list layout and onto the rail itself. Everything else in the
+		-- rail is a page in reading order; this one is an anchor, so it is placed
+		-- rather than flowed.
+		page.railButton.Parent = rail
+		page.railButton.Position = UDim2.new(0, 8, 1, -40)
+		page.railButton.ZIndex = 5
+
+		local cfgCard = page:Card("EINSTELLUNGEN", 1):Accent():Icon(UI.icon.gear)
+		local cfgState = cfgCard:Label("")
+
+		local function describe()
+			if not record then
+				return "Dieses Script speichert noch nichts."
+			end
+			if not UI.canSave() then
+				return "Dieser Executor kann keine Dateien schreiben - nichts wird gespeichert."
+			end
+			if not UI.saveOn then
+				return "Speichern ist aus. Deine Schalter sind nach dem nächsten Beitritt wieder auf Standard."
+			end
+			if record.note == "zurückgesetzt" then
+				return "Auf Standard zurückgesetzt."
+			end
+			if record.saved then
+				local age = math.max(0, math.floor(os.clock() - record.saved))
+				return UI.tf("Gespeichert vor %d s  ·  %s", age, record.file)
+			end
+			if record.loaded then
+				return UI.tf("Geladen aus %s - Änderungen werden automatisch gespeichert.", record.file)
+			end
+			return "Änderungen werden automatisch gespeichert."
+		end
+		cfgState.set(describe())
+
+		if record then
+			local saveToggle
+			saveToggle = cfgCard:Toggle("Einstellungen speichern", UI.saveOn, function(v)
+				local on = UI.setSave(v)
+				if on then pcall(UI.configSave, record.alias, true) end
+				-- Read-back, not the argument: an executor with a writefile that
+				-- does nothing must snap the switch back rather than lie.
+				if on ~= v and saveToggle then saveToggle:set(on) end
+				cfgState.set(describe())
+			end, "Deine Schalter bleiben nach einem Rejoin erhalten.", UI.theme.good)
+
+			cfgCard:Button("Jetzt speichern", function()
+				local ok = UI.configSave(record.alias, true)
+				cfgState.set(ok and describe() or
+					"Konnte nicht speichern - dieser Executor erlaubt kein writefile.")
+			end)
+
+			-- The controls hold their own visual state and nothing maps a switch
+			-- back to a CONFIG key, so a reset that only rewrote the table would
+			-- leave every toggle on screen showing the old value. Rebuilding is
+			-- the honest fix: destroy this panel and let the loader run the
+			-- script again, which now reads the defaults it just restored. Run by
+			-- hand (bridge.py file) there is no loader, so it says what to do.
+			cfgCard:Button("Auf Standard zurücksetzen", function()
+				UI.configReset(record.alias)
+				cfgState.set("Auf Standard zurückgesetzt.")
+				local reload = _G.__SEL and _G.__SEL.reload
+				if type(reload) == "function" then
+					task.delay(0.4, function()
+						pcall(function() window:Destroy() end)
+						pcall(reload)
+					end)
+				else
+					cfgState.set("Auf Standard zurückgesetzt - Script neu starten.")
+				end
+			end, UI.theme.bad)
+		end
+
+		-- Sharing. Third card rather than more buttons on the first: exporting is
+		-- not maintenance, it is something you do once and hand to somebody else,
+		-- and it needs a paste field that the other two cards have no use for.
+		if record then
+			local shareCard = page:Card("TEILEN", 0):Icon(UI.icon.loop)
+			shareCard:Label("Gib deine Einstellungen als Code weiter. Der Code enthält nur, was du gegenüber dem Standard geändert hast, und er gilt nur für dieses eine Script.")
+			local shareState = shareCard:Label("")
+			local shareBox = shareCard:Input("XYUREI X-FLOID1....")
+
+			shareCard:Button("Export - Code erzeugen", function()
+				local code, count = UI.configExport(record.alias)
+				if not code then
+					shareState.set(count == "unchanged"
+						and "Nichts zu teilen - alles steht noch auf Standard."
+						or "Export nicht möglich.")
+					return
+				end
+				shareBox.set(code)
+				-- The clipboard is a convenience, not the feature: setclipboard is
+				-- missing on some executors, so the code is in the box either way
+				-- and the line below says which of the two happened.
+				local copied = false
+				if setclipboard then copied = pcall(setclipboard, code) end
+				shareState.set(UI.tf(copied
+					and "%d Einstellungen kopiert - Code steckt in der Zwischenablage."
+					or "%d Einstellungen - Code steht im Feld, von dort kopieren.", count))
+			end, UI.theme.good)
+
+			shareCard:Button("Import - Code aus dem Feld übernehmen", function()
+				local ok, info = UI.configImport(shareBox.get(), record.alias)
+				if not ok then
+					local wrong = type(info) == "string" and string.match(info, "^wrong:(.+)$")
+					if wrong then
+						shareState.set(UI.tf("Dieser Code gehört zu %s, nicht zu diesem Script.", wrong))
+					elseif info == "truncated" then
+						shareState.set("Code ist unvollständig - beim Kopieren abgeschnitten.")
+					elseif info == "prefix" then
+						shareState.set("Das ist kein XYUREI X-FLOID-Code.")
+					elseif info == "empty" then
+						shareState.set("Erst einen Code in das Feld einfügen.")
+					else
+						shareState.set("Code nicht lesbar.")
+					end
+					return
+				end
+				if info == 0 then
+					shareState.set("Der Code enthält nichts, was hier anders wäre.")
+					return
+				end
+				shareState.set(UI.tf("%d Einstellungen übernommen - Panel wird neu aufgebaut.", info))
+				-- Same reason as reset: nothing maps a switch on screen back to a
+				-- CONFIG key, so the only honest repaint is to build the panel again.
+				local reload = _G.__SEL and _G.__SEL.reload
+				if type(reload) == "function" then
+					task.delay(0.6, function()
+						pcall(function() window:Destroy() end)
+						pcall(reload)
+					end)
+				else
+					shareState.set(UI.tf("%d Einstellungen übernommen - Script neu starten.", info))
+				end
+			end, UI.theme.warn)
+
+			shareCard:Label("Ein fremder Code kann nur Schalter setzen, die dieses Script selbst kennt, und nur mit dem passenden Typ. Er wird ohne Umgebung geladen und kann nichts ausführen.")
+		end
+
+		-- The two switches that are NOT per script: they belong to the executor and
+		-- lived only behind the mark in the rail, which nobody finds. Same page now,
+		-- second card, and the mark still works for anyone used to it.
+		local devCard = page:Card("PANEL", 2):Icon(UI.icon.sliders)
+		local autoLabel = devCard:Label("")
+		local function autoText()
+			return UI.autoload and "An: das Panel kommt in jedem Spiel, das XYUREI X-FLOID kennt."
+				or "Aus: das Panel kommt nur in dem Spiel, in dem du den Loader ausführst."
+		end
+		autoLabel.set(autoText())
+		local autoToggle
+		autoToggle = devCard:Toggle("Auto-Start in neuen Spielen", UI.getAutoload(), function(v)
+			local on = UI.setAutoload(v)
+			on = UI.getAutoload()
+			if on ~= v and autoToggle then autoToggle:set(on) end
+			autoLabel.set(autoText())
+		end, "Ohne das startet XYUREI X-FLOID nur in dem Spiel, in dem du es aufrufst.")
+
+		devCard:Button("Panel-Größe: PC oder Handy", function() pcall(UI.askDevice) end)
+		devCard:Label(UI.tf("XYUREI X-FLOID v%s  ·  Sprache und Größe gelten für alle Scripts.", UI.VERSION))
+
+		task.spawn(function()
+			while page.holder.Parent do
+				cfgState.set(describe())
+				task.wait(5)
+			end
+		end)
+
+		page:Fill()
+		return page
+	end
+
+	--------------------------------------------------------------- HOME
+	--
+	-- Always the first entry in the rail, always the page you land on. Everything
+	-- ships through a public GitHub repo anyway, so the commit log IS the
+	-- changelog - there is no second list to maintain and no way for it to drift
+	-- out of date. Commits here are written "<script>: what changed", which is
+	-- exactly "which game was updated" plus "what happened".
+	function window:Home(options2)
+		options2 = options2 or {}
+		local page = self:Page(options2.name or "Home", UI.icon.home)
+
+		-- Move it to the front of the rail and make it the landing page. Page()
+		-- appends, so without this Home would sit wherever it was declared.
+		table.remove(self.pages, #self.pages)
+		table.insert(self.pages, 1, page)
+		for i, p in ipairs(self.pages) do p.railButton.LayoutOrder = i end
+		show(page)
+
+		-- PAID SCRIPTS OPEN ON THEIR OWN FIRST PAGE, not on Home. Someone who
+		-- just walked through a key gate sees a changelog and a report card and
+		-- reads it as "the key did nothing"; the user got exactly those reports.
+		-- Home stays first in the rail. `landOnGame` overrides either way. The
+		-- switch is deferred because scripts call Home() before OR after their
+		-- own pages, and only after the build is the first game page known.
+		local land = options2.landOnGame
+		if land == nil then
+			local g = _G.__SEL and _G.__SEL.game
+			land = type(g) == "table" and g.paid == true
+		end
+		if land then
+			task.delay(0.3, function()
+				local target = self.pages[2]
+				if target and target ~= page and page.holder.Parent then show(target) end
+			end)
+		end
+
+		-- Six, not eight. Each entry is ~46px and the body is 420px tall, so
+		-- eight ran straight under the Discord bar and the last two were
+		-- unreachable. Six fills the page and stops at the edge.
+		-- Two columns like the mockup: the changelog as a timeline on the left,
+		-- what the panel is doing right now on the right. Not full width - a
+		-- single wide list of commits is all a HOME page would be, and the
+		-- interesting half is "is my farm actually running".
+		local card = page:Card("CHANGELOG", 1):Accent():Icon(UI.icon.clock)
+		card:Label("lädt ...")
+		local body2 = card.rowHolder
+
+		-- Deliberately does NOT repeat wins / rate / rebirths: those are already in
+		-- the status strip two centimetres above, and printing them twice on the
+		-- same screen is just noise. What is not up there is which page you are
+		-- on, how long this session has been running and where the script came
+		-- from - so that is what goes here.
+		local live = page:Card("LÄUFT GERADE", 2):Icon(UI.icon.loop)
+		local liveTitle = live:Label("-")
+		local liveSub = live:Label("")
+		local liveMeta = live:Label("")
+		page.live = { title = liveTitle, sub = liveSub, meta = liveMeta }
+
+		local started = os.clock()
+		task.spawn(function()
+			while page.holder.Parent do
+				liveTitle.set(window.stripTitle.Text)
+				liveSub.set(window.stripSub.Text)
+				local mins = math.floor((os.clock() - started) / 60)
+				liveMeta.set(UI.tf("Sitzung %d min  ·  %d Seiten  ·  XYUREI X-FLOID v%s",
+					mins, #window.pages, UI.VERSION))
+				task.wait(5)
+			end
+		end)
+
+		-- Report card. Sits on Home, under the live panel, so a user who thinks
+		-- something is broken finds it without being told where to look.
+		local report = page:Card("PROBLEM MELDEN", 2):Icon(UI.icon.shield)
+		page.isHome = true
+		local reportHint = report:Label("Bug reports only. Pick the kind of problem, then write one sentence: what you did and what went wrong. No links, keys or usernames - this is not a chat.")
+
+		-- A REQUIRED category. The choices are dictionary keys, so the dropdown
+		-- shows them translated and hands back the English original; the relay
+		-- gets the short code, never the display text. Kept to ~10 characters -
+		-- the dropdown box is 96px and truncates anything longer.
+		local CATEGORIES = { "Won't load", "No effect", "Wrong", "Error", "Other" }
+		local CATEGORY_CODE = { ["Won't load"] = "load", ["No effect"] = "nothing",
+			["Wrong"] = "wrong", ["Error"] = "error", ["Other"] = "other" }
+		-- The long form, shown in the confirmation so nobody has to guess what
+		-- "Wrong" meant when they picked it.
+		local CATEGORY_LONG = {
+			["Won't load"] = "The script does not load / no panel",
+			["No effect"] = "The panel is there but a feature does nothing",
+			["Wrong"] = "A feature does the wrong thing",
+			["Error"] = "An error message, or the game freezes / crashes",
+			["Other"] = "Something else",
+		}
+		local category = nil
+		-- Forward-declared: the dropdown's callback repaints the button, and a
+		-- local is invisible above its own definition.
+		local paintReportBtn
+		report:Dropdown("What kind of problem?", CATEGORIES, "Pick one", function(choice)
+			category = choice
+			if paintReportBtn then paintReportBtn() end
+		end)
+
+		-- Free text, and it is REQUIRED. It used to be optional with a two-press
+		-- confirmation instead, and both halves of that were wrong: the reports
+		-- that arrived carried notes like "Bereit" and "0 wins lvl 0" from panels
+		-- that had just been loaded, and the confirmation read as a broken button
+		-- because pressing MELDEN appeared to do nothing the first time. One rule
+		-- replaces both - say what is broken, then it sends on the first press.
+		local MAX_MESSAGE = 300
+		local msgRow = report.row(nil, nil, 0)
+		msgRow.title:Destroy()
+		msgRow.inner.Size = UDim2.new(1, -22, 0, 58)
+		msgRow.inner.AutomaticSize = Enum.AutomaticSize.None
+		local msgBox = frame(msgRow.inner, UDim2.new(1, 0, 0, 58), nil, UI.theme.input)
+		msgBox.ZIndex = 5
+		corner(msgBox, 7)
+		stroke(msgBox, UI.theme.band, 0)
+		pad(msgBox, 9, 9, 7, 7)
+		local msgInput = Instance.new("TextBox")
+		msgInput.BackgroundTransparency = 1
+		msgInput.Size = UDim2.fromScale(1, 1)
+		msgInput.Text = ""
+		setPlaceholder(msgInput, "e.g. Auto rebirth is on but it never rebirths")
+		msgInput.TextSize = 11
+		msgInput.Font = UI.font.body
+		msgInput.TextColor3 = UI.theme.textSoft
+		msgInput.PlaceholderColor3 = UI.theme.faint
+		msgInput.TextXAlignment = Enum.TextXAlignment.Left
+		msgInput.TextYAlignment = Enum.TextYAlignment.Top
+		msgInput.TextWrapped = true
+		msgInput.MultiLine = true
+		msgInput.ClearTextOnFocus = false
+		msgInput.ZIndex = 6
+		msgInput.Parent = msgBox
+		local counter = label(msgRow.inner, "", 9, UI.font.mono, UI.theme.fainter)
+		counter.Position = UDim2.new(1, -60, 0, 60)
+		counter.Size = UDim2.fromOffset(60, 12)
+		counter.TextXAlignment = Enum.TextXAlignment.Right
+		counter.ZIndex = 6
+		-- Cut at the ceiling as it is typed. The Worker caps it too, but silently
+		-- losing the end of what somebody wrote is worse than stopping them.
+		msgInput:GetPropertyChangedSignal("Text"):Connect(function()
+			if #msgInput.Text > MAX_MESSAGE then
+				msgInput.Text = string.sub(msgInput.Text, 1, MAX_MESSAGE)
+			end
+			counter.Text = #msgInput.Text .. " / " .. MAX_MESSAGE
+		end)
+
+		-- THE GATE. Measured on the live #reports forum 2026-09-25: of 335
+		-- reports, 111 were nothing but the Discord invite - the Discord bar below
+		-- copies it to the clipboard and this is the only text box in sight - 20
+		-- more were other links and loadstrings, a dozen were keys or settings
+		-- codes typed on the key page, and most of the rest were usernames, "free
+		-- robux" and keyboard mash. Only ~40 described a problem. So a report must
+		-- look like a sentence, carry no link, and come with a category, and the
+		-- panel says WHICH rule was broken - a grey button that does not say why is
+		-- what gets pressed twenty times. The relay enforces the same rules
+		-- (tools/report-relay/worker.js); keep the numbers in step.
+		local MIN_LETTERS = 15
+		local MIN_WORDS = 3
+		local COOLDOWN = 120          -- seconds between two reports
+		local SESSION_CAP = 3         -- reports per Lua VM, i.e. per game session
+		-- The bare-domain endings need a non-letter after them (%f[%A]): "work.Come
+		-- on" is a sentence typed without a space, not a link.
+		local LINKS = { "https?://", "www%.", "loadstring", "httpget", "rscripts",
+			"pastebin", "github", "require%s*%(", "%w%.gg/", "%w%.ly/",
+			"%w%.com%f[%A]", "%w%.net%f[%A]", "%w%.org%f[%A]", "%w%.io%f[%A]",
+			"%w%.xyz%f[%A]", "%w%.lua%f[%A]" }
+		local reportBtn
+		-- `busy` is the lock that was missing. The button runs its callback in a
+		-- task.spawn and `sent` was only set after the HTTP call returned, so a
+		-- double tap - or a phone registering one tap twice - sent the same report
+		-- two or three times within 30ms. That is where the identical triples in
+		-- the forum came from.
+		local sent, busy = false, false
+		-- Per session, not per panel: a rebuilt panel (reload, language reset)
+		-- must not hand out a fresh allowance.
+		local sess = _G.__SEL_REPORTS
+		if type(sess) ~= "table" then sess = { count = 0, last = 0 } _G.__SEL_REPORTS = sess end
+
+		local function trimmed()
+			local t = string.gsub(msgInput.Text, "^%s+", "")
+			t = string.gsub(t, "%s+$", "")
+			return t
+		end
+
+		-- Letters, not bytes. A UTF-8 lead byte is one character, so Cyrillic,
+		-- Arabic or Thai are measured like Latin; CJK, kana and Hangul (lead
+		-- bytes E3-ED) count double because one of those is closer to a word.
+		-- E2 (symbols, arrows, dingbats) and F0+ (emoji) count as nothing.
+		local function weight(b)
+			if (b >= 65 and b <= 90) or (b >= 97 and b <= 122) then return 1 end
+			if b >= 0xC3 and b <= 0xE1 then return 1 end
+			if b >= 0xE3 and b <= 0xED then return 2 end
+			if b == 0xEE or b == 0xEF then return 1 end
+			return 0
+		end
+		local function measure(text)
+			local m = { letters = 0, digits = 0, nonAscii = 0, distinct = 0, words = 0 }
+			local seen, i, n = {}, 1, #text
+			while i <= n do
+				local b = string.byte(text, i)
+				local len = (b >= 0xF0 and 4) or (b >= 0xE0 and 3) or (b >= 0xC0 and 2) or 1
+				local ch = string.sub(text, i, i + len - 1)
+				i = i + len
+				local w = weight(b)
+				if b >= 48 and b <= 57 then m.digits = m.digits + 1 end
+				if w > 0 then
+					m.letters = m.letters + w
+					if b >= 0x80 then m.nonAscii = m.nonAscii + w end
+					local key = string.lower(ch)
+					if not seen[key] then seen[key] = true m.distinct = m.distinct + 1 end
+				end
+			end
+			for token in string.gmatch(text, "[^%s%p]+") do
+				local l, d = 0, 0
+				for j = 1, #token do
+					local c = string.byte(token, j)
+					if weight(c) > 0 then l = l + 1
+					elseif c >= 48 and c <= 57 then d = d + 1 end
+				end
+				if l >= 2 and l > d then m.words = m.words + 1 end
+			end
+			return m
+		end
+
+		-- nil when the text is a usable description, otherwise the sentence that
+		-- tells the user what to change. Order matters: the specific mistakes
+		-- (invite, key, settings code) get their own answer before the generic ones.
+		local function problemWith(text)
+			local low = string.lower(text)
+			if string.find(low, "discord%.gg") or string.find(low, "discord%.com") then
+				return "That is a Discord link. You do not need to report it - open it in your browser to join. This box is only for bugs."
+			end
+			if string.find(low, "XYUREI X-FLOID%-%w%w%w%w%w%-") then
+				return "That is a key, not a problem. Keys go in the box on the KEY page."
+			end
+			if string.find(low, "XYUREI X-FLOID1%.") then
+				return "That is a settings code. Share it in #configs on the Discord, not here."
+			end
+			for _, p in ipairs(LINKS) do
+				if string.find(low, p) then
+					return "No links or scripts in a report. Describe the problem in words."
+				end
+			end
+			local m = measure(text)
+			if m.digits > m.letters then
+				return "That is mostly numbers. Describe the problem in words - no usernames or ids."
+			end
+			if m.letters < MIN_LETTERS or m.distinct < 6
+				or (m.words < MIN_WORDS and m.nonAscii < 8) then
+				return UI.tf("Too short. Write a full sentence (at least %d letters and %d words): what did you do, what happened?",
+					MIN_LETTERS, MIN_WORDS)
+			end
+			return nil
+		end
+
+		-- Everything that stops a send, in the order the user should fix it.
+		local function blocker()
+			if not category then return "First pick what kind of problem it is (the box above)." end
+			local text = trimmed()
+			if text == "" then return "Write what is broken first." end
+			local why = problemWith(text)
+			if why then return why end
+			if sess.count >= SESSION_CAP then
+				return UI.tf("You already sent %d reports this session. For more, use #support on the Discord.", SESSION_CAP)
+			end
+			local wait = COOLDOWN - (os.time() - (sess.last or 0))
+			if wait > 0 then
+				return UI.tf("Please wait %d s before sending another report.", wait)
+			end
+			return nil
+		end
+
+		-- The button says whether it will do anything BEFORE it is pressed. A
+		-- press that silently does nothing is what made the old confirmation read
+		-- as a bug rather than as a question.
+		paintReportBtn = function()
+			-- reportBtn is still nil while the field is being typed into during
+			-- construction, so this is checked rather than assumed.
+			if not reportBtn or sent or busy then return end
+			local ready = blocker() == nil
+			reportBtn.BackgroundColor3 = ready and UI.theme.warn or UI.theme.band
+			setText(reportBtn, ready and "CHECK AND SEND" or "REPORT NOT READY")
+		end
+
+		-- Repaint as it is typed, so the button turns from grey to live the moment
+		-- the description is good enough.
+		msgInput:GetPropertyChangedSignal("Text"):Connect(paintReportBtn)
+
+		------------------------------------------------------- confirmation
+		-- A popup INSIDE the panel that shows exactly what will be sent and asks
+		-- "is this the problem?". People did not understand what this box was for;
+		-- seeing the game, the script and what the script is doing right now
+		-- next to their own sentence is what makes that obvious.
+		local confirmGui
+		local function closeConfirm()
+			if confirmGui then pcall(function() confirmGui:Destroy() end) end
+			confirmGui = nil
+		end
+
+		local function openConfirm(r, choice, onSend)
+			closeConfirm()
+			-- A button, not a frame: it has to swallow clicks so nothing under
+			-- the popup can be pressed while it is open.
+			local scrim = Instance.new("TextButton")
+			scrim.Name = "XYUREI X-FLOIDReportConfirm"
+			scrim.Size = UDim2.fromScale(1, 1)
+			scrim.BackgroundColor3 = Color3.new(0, 0, 0)
+			scrim.BackgroundTransparency = 0.3
+			scrim.BorderSizePixel = 0
+			scrim.Text = ""
+			scrim.AutoButtonColor = false
+			scrim.ZIndex = 300
+			scrim.Parent = root
+			corner(scrim, 13)
+			confirmGui = scrim
+
+			local box = frame(scrim, UDim2.fromOffset(470, 0), nil, UI.theme.window)
+			box.AnchorPoint = Vector2.new(0.5, 0.5)
+			box.Position = UDim2.fromScale(0.5, 0.5)
+			box.AutomaticSize = Enum.AutomaticSize.Y
+			box.Active = true
+			box.ZIndex = 301
+			corner(box, 12)
+			stroke(box, UI.theme.warn, 0.35)
+			pad(box, 18, 18, 16, 16)
+			listLayout(box, 7)
+			local order = 0
+			local function nextOrder() order = order + 1 return order end
+
+			local title = label(box, "Is this the problem?", 15, UI.font.heading, UI.theme.warn)
+			title.Size = UDim2.new(1, 0, 0, 18)
+			title.LayoutOrder = nextOrder()
+			title.ZIndex = 302
+			local sub = label(box, "This is exactly what the developer will get. Check it, then send.",
+				11, UI.font.body, UI.theme.muted)
+			sub.Size = UDim2.new(1, 0, 0, 0)
+			sub.AutomaticSize = Enum.AutomaticSize.Y
+			sub.TextWrapped = true
+			sub.LayoutOrder = nextOrder()
+			sub.ZIndex = 302
+
+			-- caption | value. The value is DATA - the user's text, the game name
+			-- - so it is written raw, never through the dictionary, and never as
+			-- RichText (a "<" in a message must not eat the rest of the line).
+			local function line(caption, value, colour)
+				local row2 = frame(box, UDim2.new(1, 0, 0, 0), nil, UI.theme.window, 1)
+				row2.AutomaticSize = Enum.AutomaticSize.Y
+				row2.LayoutOrder = nextOrder()
+				row2.ZIndex = 302
+				local cap = label(row2, caption, 11, UI.font.body, UI.theme.dimmer)
+				cap.Size = UDim2.fromOffset(118, 14)
+				cap.TextYAlignment = Enum.TextYAlignment.Top
+				cap.ZIndex = 303
+				local val = label(row2, "", 11, UI.font.body, colour or UI.theme.textSoft)
+				val.RichText = false
+				val.Text = (value == nil or value == "") and "-" or tostring(value)
+				val.Position = UDim2.fromOffset(124, 0)
+				val.Size = UDim2.new(1, -124, 0, 0)
+				val.AutomaticSize = Enum.AutomaticSize.Y
+				val.TextWrapped = true
+				val.TextYAlignment = Enum.TextYAlignment.Top
+				val.ZIndex = 303
+				return val
+			end
+
+			line("Game", tostring(r.game) .. "   (place " .. tostring(r.place) .. ")")
+			line("Script", tostring(r.script) .. "   ·   XYUREI X-FLOID v" .. tostring(r.ui))
+			line("Page", r.page)
+			line("Script is doing", r.note ~= "" and r.status ~= ""
+				and (r.note .. "   ·   " .. r.status) or (r.note ~= "" and r.note or r.status))
+			line("Options on", string.sub(r.active or "", 1, 140))
+			line("Problem", UI.t(CATEGORY_LONG[choice] or choice), UI.theme.warn)
+			line("Your message", "\"" .. r.message .. "\"", UI.theme.text)
+
+			local foot = label(box, "Bug reports only - nobody replies here. For help, keys or questions use #support on the Discord.",
+				10, UI.font.body, UI.theme.faint)
+			foot.Size = UDim2.new(1, 0, 0, 0)
+			foot.AutomaticSize = Enum.AutomaticSize.Y
+			foot.TextWrapped = true
+			foot.LayoutOrder = nextOrder()
+			foot.ZIndex = 302
+
+			local buttons = frame(box, UDim2.new(1, 0, 0, 36), nil, UI.theme.window, 1)
+			buttons.LayoutOrder = nextOrder()
+			buttons.ZIndex = 302
+			-- 36px tall: this popup is read on phones too, and anything smaller is
+			-- a missed tap there.
+			local function button(caption, colour, xScale, onClick)
+				local b = Instance.new("TextButton")
+				b.Size = UDim2.new(0.5, -5, 1, 0)
+				b.Position = UDim2.new(xScale, xScale > 0 and 5 or 0, 0, 0)
+				b.BackgroundColor3 = colour
+				b.BorderSizePixel = 0
+				b.AutoButtonColor = false
+				setText(b, caption)
+				b.TextSize = 12
+				b.Font = UI.font.heading
+				b.TextColor3 = colour == UI.theme.input and UI.theme.textSoft or Color3.new(1, 1, 1)
+				b.ZIndex = 303
+				b.Parent = buttons
+				corner(b, 8)
+				b.MouseButton1Click:Connect(function()
+					press(b)
+					onClick()
+				end)
+				return b
+			end
+			button("YES, SEND IT", UI.theme.warn, 0, function()
+				closeConfirm()
+				task.spawn(onSend)
+			end)
+			button("CANCEL", UI.theme.input, 0.5, function()
+				closeConfirm()
+				reportHint.set("Not sent. Change the text or the category and try again.")
+			end)
+		end
+
+		local function doSend(r)
+			if sent or busy then return end
+			busy = true
+			setText(reportBtn, "SENDING ...")
+			reportBtn.BackgroundColor3 = UI.theme.band
+			local ok, how, detail = UI.sendReport(r)
+			busy = false
+			if how == "refused" then
+				-- The relay applies the same rules; if it still says no, show its
+				-- reason and leave the card usable.
+				reportHint.set(UI.tf("The server refused this report: %s", tostring(detail or "?")))
+				paintReportBtn()
+				return
+			end
+			if not ok then
+				reportHint.set("Konnte nicht senden. Bitte im Discord im Support-Forum melden.")
+				paintReportBtn()
+				return
+			end
+			-- Locked afterwards: the same person pressing twenty times tells us
+			-- nothing more than pressing once, and it is the whole spam surface.
+			sent = true
+			sess.count = sess.count + 1
+			sess.last = os.time()
+			if how == "limit" then
+				-- Not delivered. Say so, and give the user the way round it.
+				setText(reportBtn, "LIMIT ERREICHT")
+				reportBtn.BackgroundColor3 = UI.theme.warn
+				pcall(function()
+					(setclipboard or toclipboard or set_clipboard)(r.text)
+				end)
+				reportHint.set("Von dieser Verbindung kamen zuletzt zu viele Meldungen, diese wurde NICHT zugestellt. Sie liegt in der Zwischenablage - füg sie im Discord unter #support ein, oder probier es gleich nochmal.")
+			elseif how == "doppelt" then
+				setFmt(reportBtn, "SCHON GEMELDET  #%s", r.id)
+				reportBtn.BackgroundColor3 = UI.theme.warn
+				reportHint.set("Dieses Problem wurde für dieses Spiel gerade schon gemeldet - es ist angekommen, aber nicht doppelt.")
+			elseif how == "clipboard" then
+				setFmt(reportBtn, "KOPIERT  #%s", r.id)
+				reportBtn.BackgroundColor3 = UI.theme.good
+				reportHint.set(UI.tf("In die Zwischenablage kopiert - bitte im Discord unter #support einfügen. Nummer #%s", r.id))
+			else
+				setFmt(reportBtn, "GEMELDET - DANKE  #%s", r.id)
+				reportBtn.BackgroundColor3 = UI.theme.good
+				reportHint.set(UI.tf("Angekommen. Nummer #%s - die kannst du im Support-Forum nennen.", r.id))
+			end
+		end
+
+		-- The press never sends. It either says which rule is broken, or opens
+		-- the confirmation, and only YES in there sends.
+		reportBtn = report:Button("REPORT NOT READY", function()
+			if sent or busy or confirmGui then return end
+			local why = blocker()
+			if why then
+				reportHint.set(why)
+				reportHint.label.TextColor3 = UI.theme.warn
+				return
+			end
+			reportHint.label.TextColor3 = UI.theme.dimmer
+			local r = UI.buildReport(window)
+			r.message = trimmed()
+			r.category = CATEGORY_CODE[category] or "other"
+			-- The clipboard fallback wants everything in one block; the relay gets
+			-- message and category as their own fields and formats them itself.
+			r.text = r.text .. "\nProblem: " .. tostring(category) .. "\nText: " .. r.message
+			openConfirm(r, category, function() doSend(r) end)
+		end, UI.theme.warn)
+		paintReportBtn()   -- start grey: nothing has been typed yet
+		report:Label("Sent along: game, script version, the page you were on, what the script is doing and the options that are on. No Roblox name, no UserId.")
+
+		-- The settings live on their own page with a gear at the BOTTOM of the rail.
+		-- Built from here so no game script gained a line for it, and built LAST so
+		-- Home stays the landing page.
+		self:Settings()
+
+		local function paint(list, err)
+			for _, child in ipairs(body2:GetChildren()) do
+				if child:IsA("Frame") then child:Destroy() end
+			end
+			if not list then
+				card:Label(err or "keine Verbindung zu GitHub")
+				return
+			end
+			-- A real timeline: the dots live in their own 18px gutter with a hairline
+			-- running through them, and the text starts after it. Dropped at a
+			-- negative offset next to the title - which is what this did first -
+			-- they read as specks stuck onto the text rather than as a rail.
+			local GUTTER = 18
+			for index, entry in ipairs(list) do
+				local r = card.row(entry.game, entry.summary, 54)
+				r.title.TextColor3 = UI.theme.text
+				r.title.Font = UI.font.heading
+				r.title.Position = UDim2.fromOffset(GUTTER, 0)
+				r.title.Size = UDim2.new(1, -GUTTER - 54, 0, 14)
+				if r.hint then
+					r.hint.Position = UDim2.fromOffset(GUTTER, 17)
+					r.hint.Size = UDim2.new(1, -GUTTER, 0, 0)
+				end
+
+				local newest = index == 1
+				-- the line runs the full row height, behind the dot
+				if index < #list then
+					local link = frame(r.inner, UDim2.new(0, 1, 1, -6),
+						UDim2.fromOffset(4, 12), UI.theme.band)
+					link.ZIndex = 4
+				end
+				local dot = frame(r.inner, UDim2.fromOffset(newest and 9 or 7,
+					newest and 9 or 7), UDim2.fromOffset(newest and 0 or 1, newest and 3 or 4),
+					newest and UI.theme.accent or UI.theme.fainter)
+				dot.ZIndex = 6
+				corner(dot, 5)
+				if newest then registerPulse(dot, 2.2, 0.55, 0) end
+
+				local age = label(r.inner, entry.when, 10, UI.font.mono, UI.theme.faint)
+				age.Position = UDim2.new(1, -50, 0, 0)
+				age.Size = UDim2.fromOffset(50, 14)
+				age.TextXAlignment = Enum.TextXAlignment.Right
+				age.ZIndex = 5
+			end
+			page:Fill()
+		end
+
+		-- Never on the main thread: an executor with no working http, or GitHub
+		-- rate-limiting the IP, must leave the panel usable.
+		local function load()
+			task.spawn(function()
+				local ok, list, err = pcall(UI.commits, options2.limit or 6)
+				paint(ok and list or nil, ok and err or "GitHub nicht erreichbar")
+			end)
+		end
+		load()
+		page.reload = load
+
+		return page
+	end
+
+	--------------------------------------------------------------- search
+	search:GetPropertyChangedSignal("Text"):Connect(function()
+		local query = string.lower(search.Text)
+		for _, page in ipairs(window.pages) do
+			local pageHits = 0
+			for _, card in ipairs(page.cards) do
+				local cardHits = 0
+				for _, r in ipairs(card.rows) do
+					local hit = query == "" or string.find(string.lower(r.caption), query, 1, true)
+					r.root.Visible = hit and true or false
+					if hit then cardHits = cardHits + 1 end
+				end
+				card.root.Visible = (query == "") or cardHits > 0
+				pageHits = pageHits + cardHits
+			end
+			-- dim the rail entry of a page with no hits at all
+			page.railIcon.ImageTransparency = page.railIcon:IsA("ImageLabel")
+				and ((query ~= "" and pageHits == 0) and 0.7 or 0) or nil
+			if page.railIcon:IsA("TextLabel") then
+				page.railIcon.TextTransparency = (query ~= "" and pageHits == 0) and 0.7 or 0
+			end
+		end
+	end)
+
+	--------------------------------------------------------------- hotkey
+	local hotkey = options.hotkey or Enum.KeyCode.RightShift
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed then return end
+		if input.KeyCode == hotkey then
+			root.Visible = not root.Visible
+		end
+	end)
+
+	--------------------------------------------------------------- the question
+	-- Once per executor: the card goes up, the panel waits behind it, and the
+	-- panel is revealed at the chosen scale the moment the question is answered.
+	-- The wait is polled rather than wired to a callback because askDevice builds
+	-- ONE card for however many panels are open, and every one of them has to be
+	-- released by that single answer.
+	--
+	-- The 45s ceiling is the safety net: a card that is lost (a game that wipes
+	-- the PlayerGui, an executor that refuses the ScreenGui) must not leave a
+	-- running panel invisible forever.
+	if pendingDevice then
+		task.defer(function()
+			pcall(UI.askDevice)
+			local waited = 0
+			while not UI.deviceAsked and waited < 45 do
+				task.wait(0.2)
+				waited = waited + 0.2
+			end
+			window.applyScale()
+			root.Visible = true
+		end)
+	end
+
+	return window
+end
+
+--------------------------------------------------------------------------------
+-- the HOME page
+--------------------------------------------------------------------------------
+--
+-- Everything ships through a public GitHub repo anyway, so the commit log IS the
+-- changelog - there is no second list to maintain and no way for it to go stale.
+-- Every commit in this project is written as "<script>: what changed", which is
+-- exactly "which game was updated" plus "what happened", so the parse is a split
+-- on the first colon.
+--
+--   win:Home()                       -- builds the page, fetches in the background
+--   UI.commits(limit) -> list        -- if a script wants the raw data
+--
+-- The fetch is wrapped in pcall and runs in a task.spawn: an executor without a
+-- working http_request, or GitHub rate-limiting the IP, must degrade to "keine
+-- Verbindung" rather than take the panel down with it.
+
+local function httpGet(url)
+	local request = (syn and syn.request) or (http and http.request) or http_request or request
+	if request then
+		local ok, response = pcall(request, {
+			Url = url, Method = "GET",
+			Headers = { ["User-Agent"] = "XYUREI X-FLOID", ["Accept"] = "application/vnd.github+json" },
+		})
+		if ok and response and response.Body then return response.Body end
+	end
+	local ok, body = pcall(function() return game:HttpGet(url) end)
+	if ok then return body end
+	return nil
+end
+
+local function ago(iso)
+	-- "2026-08-20T03:32:46Z" -> "2 Std". No os.difftime on a parsed string in
+	-- Luau, so the parts are pulled out with a pattern and fed to os.time.
+	local y, mo, d, h, mi, s = string.match(iso or "",
+		"(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+	if not y then return "" end
+	local when = os.time({ year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+		hour = tonumber(h), min = tonumber(mi), sec = tonumber(s) })
+	-- os.time treats the table as local time; the stamp is UTC, so correct by the
+	-- machine's own offset instead of assuming a timezone.
+	local offset = os.time() - os.time(os.date("!*t", os.time()))
+	local delta = os.time() - (when + offset)
+	if delta < 90 then return UI.t("gerade eben") end
+	if delta < 5400 then return UI.tf("%d Min", math.floor(delta / 60)) end
+	if delta < 172800 then return UI.tf("%d Std", math.floor(delta / 3600)) end
+	return UI.tf("%d Tage", math.floor(delta / 86400))
+end
+
+-- A one-click "this is broken" report ------------------------------------------
+--
+-- The user types NOTHING. Everything worth knowing is already on screen: which
+-- game, which script version, and - the valuable part - the panel's own last
+-- note, which is where these scripts write the reason something failed. A report
+-- built from that is actionable without a single follow-up question.
+--
+-- What is deliberately NOT sent: the Roblox name and user id. Those are somebody
+-- else's account, they are not needed to fix a script, and collecting them from
+-- strangers is not something a bug button should do quietly.
+
+local function executorName()
+	local ok, name = pcall(function()
+		return (identifyexecutor or getexecutorname or function() return nil end)()
+	end)
+	return (ok and name) or "unbekannt"
+end
+
+function UI.buildReport(window, note)
+	local placeId = tostring(game.PlaceId)
+	local gameName = "?"
+	pcall(function()
+		gameName = (_G.__SEL and _G.__SEL.game and _G.__SEL.game.name) or game.Name or "?"
+	end)
+	local alias = "?"
+	pcall(function() alias = (_G.__SEL and _G.__SEL.game and _G.__SEL.game.alias) or "?" end)
+
+	local active = {}
+	if window and window.chips then
+		for _, entry in pairs(window.chips) do
+			if entry.on and entry.caption then table.insert(active, entry.caption) end
+		end
+	end
+	table.sort(active)
+
+	-- The report card sits on Home, so the page that matters is the one the user
+	-- came from (show() remembers it as lastPage).
+	local pageName = "?"
+	pcall(function()
+		local p = window and window.current
+		if p and p.isHome and window.lastPage then p = window.lastPage end
+		pageName = (p and p.name) or "?"
+	end)
+
+	local report = {
+		page = pageName,
+		place = placeId,
+		game = gameName,
+		script = alias,
+		ui = UI.VERSION,
+		executor = executorName(),
+		-- the panel's own words: status line, last note, and whatever the script
+		-- parked in STATE.blocked
+		status = window and window.stripSub and window.stripSub.Text or "",
+		note = note or (window and window.stripTitle and window.stripTitle.Text) or "",
+		active = table.concat(active, ", "),
+		at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+	}
+	-- short id so the user has something to quote in the support forum
+	local seed = 0
+	for _, ch in ipairs({ string.byte(placeId .. report.at, 1, -1) }) do
+		seed = (seed * 31 + ch) % 0xFFFFFF
+	end
+	report.id = string.format("%04x", seed % 0xFFFF)
+
+	report.text = table.concat({
+		"**XYUREI X-FLOID report #" .. report.id .. "**",
+		"Spiel: " .. report.game .. "  (place " .. report.place .. ")",
+		"Script: " .. report.script .. "   UI v" .. report.ui .. "   page " .. report.page,
+		"Status: " .. (report.status ~= "" and report.status or "-"),
+		"Notiz: " .. (report.note ~= "" and report.note or "-"),
+		"Aktiv: " .. (report.active ~= "" and report.active or "-"),
+		"Executor: " .. report.executor .. "   " .. report.at,
+	}, "\n")
+	return report
+end
+
+-- Returns ok, wie ("relay" | "limit" | "doppelt" | "clipboard" | "keiner"),
+-- or false, "refused", <relay's reason> when the relay rejected the content.
+function UI.sendReport(report)
+	if UI.REPORT_URL ~= "" then
+		local request = (syn and syn.request) or (http and http.request) or http_request or request
+		if request then
+			local ok, response = pcall(request, {
+				Url = UI.REPORT_URL,
+				Method = "POST",
+				Headers = { ["Content-Type"] = "application/json" },
+				Body = HttpService:JSONEncode(report),
+			})
+			if ok and response and (response.StatusCode or 0) < 400 then
+				-- READ THE BODY, NOT JUST THE STATUS. The relay answers 200 for
+				-- three different outcomes on purpose - delivered, dropped by the
+				-- rate limit, dropped as a duplicate - because the panel has
+				-- already thanked the user and a spammer should not learn which
+				-- gate they hit. But telling the user "Angekommen" when it was
+				-- silently discarded is a lie, and it cost a whole debugging
+				-- round: the panel said it arrived, Discord was empty, and the
+				-- only trace was a counter sitting at its cap in KV.
+				local body = tostring(response.Body or "")
+				if string.find(body, "limit", 1, true) then
+					return true, "limit"
+				elseif string.find(body, "dup", 1, true) then
+					return true, "doppelt"
+				end
+				return true, "relay"
+			end
+			-- 400/422 is the relay applying its rules (no link, too short, no
+			-- category). Falling back to the clipboard there would only move the
+			-- same unusable text into #support, so the reason goes back to the
+			-- card instead. Anything else (5xx, no answer) still falls back.
+			local code = ok and response and (response.StatusCode or 0) or 0
+			if code == 400 or code == 422 then
+				return false, "refused", tostring(response.Body or code)
+			end
+		end
+	end
+	-- No relay, or it refused: the clipboard still gets the report to us.
+	local ok = pcall(function()
+		(setclipboard or toclipboard or set_clipboard)(report.text)
+	end)
+	return ok, ok and "clipboard" or "keiner"
+end
+
+function UI.commits(limit)
+	local body = httpGet("https://api.github.com/repos/" .. UI.REPO ..
+		"/commits?per_page=" .. tostring(limit or 8))
+	if not body then return nil, "keine Verbindung" end
+	local ok, data = pcall(function() return HttpService:JSONDecode(body) end)
+	if not ok or type(data) ~= "table" then return nil, "unlesbare Antwort" end
+	local out = {}
+	for _, entry in ipairs(data) do
+		local message = entry.commit and entry.commit.message or ""
+		message = string.match(message, "^[^\n]*") or message
+		local game_, summary = string.match(message, "^([%w%-_%.]+):%s*(.+)$")
+		table.insert(out, {
+			game = game_ or "hub",
+			summary = summary or message,
+			when = ago(entry.commit and entry.commit.author and entry.commit.author.date),
+			sha = string.sub(entry.sha or "", 1, 7),
+		})
+	end
+	return out
+end
+
+return UI
