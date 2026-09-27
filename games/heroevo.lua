@@ -958,7 +958,7 @@ UI.config("heroevo", CONFIG)
 
 local win = UI.Window({
 	name = "HeroEvoPanel",
-	title = "HERO", accentTitle = "EVO", subtitle = "seltonmt",
+	title = "HERO", accentTitle = "EVO", subtitle = "XYUREI TEAM",
 	badge = "🦸", width = 820, height = 582,
 })
 _G.__HEROEVO_WIN = win

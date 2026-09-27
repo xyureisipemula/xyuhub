@@ -2712,7 +2712,7 @@ UI.config("arsenal", CONFIG)
 
 local win = UI.Window({
 	name = "ArsenalPanel",
-	title = "ARS", accentTitle = "ENAL", subtitle = "seltonmt",
+	title = "ARS", accentTitle = "ENAL", subtitle = "XYUREI TEAM",
 	badge = "◎", width = 940, height = 590,
 })
 _G.__ARSENAL_WIN = win

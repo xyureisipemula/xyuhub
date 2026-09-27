@@ -521,7 +521,7 @@ if UI.sweep then UI.sweep("PICKAXESIM") end
 UI.config("pickaxesim", CONFIG)
 
 local win = UI.Window({
-    title = "PICKAXE", accentTitle = "SIM", subtitle = "seltonmt",
+    title = "PICKAXE", accentTitle = "SIM", subtitle = "XYUREI TEAM",
     badge = "\226\155\143", width = 920, height = 580,
 })
 _G.__PICKSIM_WIN = win

@@ -1254,7 +1254,7 @@ UI.config("jetpackbrainrots", CONFIG)
 
 local win = UI.Window({
 	name = PANEL_NAME,
-	title = "JETPACK", accentTitle = "BRAINROTS", subtitle = "seltonmt",
+	title = "JETPACK", accentTitle = "BRAINROTS", subtitle = "XYUREI TEAM",
 	badge = "🚀", width = 920, height = 580,
 })
 _G.__JETPACK_WIN = win

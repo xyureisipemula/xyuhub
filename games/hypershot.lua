@@ -3114,7 +3114,7 @@ UI.config("hypershot", CONFIG)
 
 local win = UI.Window({
 	name = "HypershotPanel",
-	title = "HYPER", accentTitle = "SHOT", subtitle = "seltonmt",
+	title = "HYPER", accentTitle = "SHOT", subtitle = "XYUREI TEAM",
 	badge = "◎", width = 820, height = 582,
 })
 _G.__HYPER_WIN = win

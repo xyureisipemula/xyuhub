@@ -2968,7 +2968,7 @@ for _, parent in ipairs(UI.roots and UI.roots() or {}) do
 	end
 end
 
-local win = UI.Window({ title = "ISLAND", accentTitle = "ESCAPE", subtitle = "seltonmt", name = GUI_NAME })
+local win = UI.Window({ title = "ISLAND", accentTitle = "ESCAPE", subtitle = "XYUREI TEAM", name = GUI_NAME })
 win:Home()
 
 local farm = win:Page("FARMING", UI.icon.pickaxe)

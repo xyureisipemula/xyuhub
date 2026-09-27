@@ -646,7 +646,7 @@ end
 UI.config("ammoclick", CONFIG)
 
 local win = UI.Window({
-    title = "AMMO", accentTitle = "CLICK", subtitle = "seltonmt",
+    title = "AMMO", accentTitle = "CLICK", subtitle = "XYUREI TEAM",
     badge = "\240\159\148\171", width = 920, height = 580,
 })
 _G.__AMMOCLICK_WIN = win

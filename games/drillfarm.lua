@@ -1,5 +1,5 @@
 --!nocheck
--- [Make a Drill Farm] - place 79315121100812, by seltonmt
+-- [Make a Drill Farm] - place 79315121100812, by XYUREI TEAM
 --
 -- The game runs on Knit, so every action is a plainly named RemoteFunction under
 -- ReplicatedStorage.Source.Packages._Index.sleitnick_knit@1.5.1.knit.Services.
@@ -738,7 +738,7 @@ local win = UI.Window({
 	name = "DrillFarm",
 	title = "DRILL",
 	accentTitle = "FARM",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 	badge = "⛏",
 	width = 920,
 	height = 580,
@@ -964,4 +964,4 @@ _G.__DRILLFARM_DBG = {
 }
 
 refreshState()
-print("[drillfarm] by seltonmt - running (gen " .. generation .. ") - RightShift toggles the UI")
+print("[drillfarm] by XYUREI TEAM - running (gen " .. generation .. ") - RightShift toggles the UI")

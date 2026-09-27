@@ -3245,7 +3245,7 @@ end)
 
 local win = UI.Window({
 	name = "XYUREI X-FLOIDPhantomPanel",
-	title = "XYUREI X-FLOID", accentTitle = "PHANTOM", subtitle = "seltonmt",
+	title = "XYUREI X-FLOID", accentTitle = "PHANTOM", subtitle = "XYUREI TEAM",
 })
 ENV.__SELPF_WIN = win
 
@@ -3466,7 +3466,7 @@ modInfo:Button("Rejoin this server now", function()
 				.. 'pcall(function() getgenv().__SEL_TP = "phantomforces" end) '
 				.. 'pcall(function() writefile("XYUREI X-FLOID-queue.txt", "phantomforces") end) '
 				.. 'loadstring(game:HttpGet("https://raw.githubusercontent.com/'
-				.. 'seltonmt012/sel01-rbx/main/loader.lua"))()')
+				.. 'XYUREI TEAM012/XYUREI X-FLOID-rbx/main/loader.lua"))()')
 		end
 	end
 	task.spawn(function()
@@ -3545,7 +3545,7 @@ silReq:Button("Rejoin this server now", function()
 				.. 'pcall(function() getgenv().__SEL_TP = "phantomforces" end) '
 				.. 'pcall(function() writefile("XYUREI X-FLOID-queue.txt", "phantomforces") end) '
 				.. 'loadstring(game:HttpGet("https://raw.githubusercontent.com/'
-				.. 'seltonmt012/sel01-rbx/main/loader.lua"))()')
+				.. 'XYUREI TEAM012/XYUREI X-FLOID-rbx/main/loader.lua"))()')
 		end
 	end
 	task.spawn(function()

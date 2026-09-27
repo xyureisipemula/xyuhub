@@ -1122,7 +1122,7 @@ local win = UI.Window({
 	name = "LootToForgePanel",
 	title = "LOOT",
 	accentTitle = "FORGE",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 })
 
 local farm = win:Page("FARM", UI.icon.bolt)

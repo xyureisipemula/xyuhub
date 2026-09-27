@@ -1140,7 +1140,7 @@ if not CONFIG.rebirthDefaultMigrated then
 end
 
 local win = UI.Window({
-    title = "FIND", accentTitle = "EGG", subtitle = "seltonmt",
+    title = "FIND", accentTitle = "EGG", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "FINDEGG_PANEL",
 })
 _G.__FINDEGG_WIN = win

@@ -1317,7 +1317,7 @@ if UI.sweep then pcall(function() UI.sweep("AIMCLICK") end) end
 UI.config("aimclick", CONFIG)
 
 local win = UI.Window({
-    title = "AIM", accentTitle = "CLICK", subtitle = "seltonmt",
+    title = "AIM", accentTitle = "CLICK", subtitle = "XYUREI TEAM",
     name = "XYUREI X-FLOID_aimclick",
 })
 _G.__AIMCLICK_WIN = win

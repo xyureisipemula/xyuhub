@@ -1120,7 +1120,7 @@ if UI.sweep then UI.sweep("PACKRNG") end
 UI.config("packrng", CONFIG)
 
 local win = UI.Window({
-    title = "PACK", accentTitle = "RNG", subtitle = "seltonmt",
+    title = "PACK", accentTitle = "RNG", subtitle = "XYUREI TEAM",
     name = "PACKRNG", badge = "\240\159\141\128", width = 820, height = 582,
 })
 _G.__PACKRNG_WIN = win

@@ -993,7 +993,7 @@ if _G.__MUSCLE_WIN then pcall(function() _G.__MUSCLE_WIN:Destroy() end) end
 UI.config("muscleevo", CONFIG)
 
 local win = UI.Window({
-	title = "MUSCLE", accentTitle = "EVO", subtitle = "seltonmt",
+	title = "MUSCLE", accentTitle = "EVO", subtitle = "XYUREI TEAM",
 	badge = "💪", width = 920, height = 580,
 })
 _G.__MUSCLE_WIN = win

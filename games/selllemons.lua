@@ -1204,7 +1204,7 @@ if _G.__LEMON_WIN then pcall(function() _G.__LEMON_WIN:Destroy() end) end
 UI.config("selllemons", CONFIG)
 
 local win = UI.Window({
-	title = "SELL", accentTitle = "LEMONS", subtitle = "seltonmt",
+	title = "SELL", accentTitle = "LEMONS", subtitle = "XYUREI TEAM",
 	badge = "🍋", width = 820, height = 582,
 })
 _G.__LEMON_WIN = win

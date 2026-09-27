@@ -1188,7 +1188,7 @@ local win = UI.Window({
 	name = "AnimeDice",
 	title = "ANIME",
 	accentTitle = "DICE",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 	badge = "◈",
 })
 _G.__ANIMEDICE_GUI = win.gui

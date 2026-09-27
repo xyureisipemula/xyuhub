@@ -1,5 +1,5 @@
 --!nocheck
--- +1 Skill Point Legends  --  place 135668295983945  --  seltonmt
+-- +1 Skill Point Legends  --  place 135668295983945  --  XYUREI TEAM
 --
 -- This game is unusually open: there are no named remotes at all, everything
 -- goes through ByteNet (two binary channels), but the entire client source sits
@@ -359,7 +359,7 @@ local credit = Instance.new("TextLabel")
 credit.Size = UDim2.fromOffset(100, 20)
 credit.Position = UDim2.new(0, 176, 0, 8)
 credit.BackgroundTransparency = 1
-credit.Text = "by seltonmt"
+credit.Text = "by XYUREI TEAM"
 credit.TextXAlignment = Enum.TextXAlignment.Left
 credit.TextColor3 = COLORS.accent
 credit.Font = Enum.Font.GothamMedium

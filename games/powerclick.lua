@@ -982,7 +982,7 @@ if _G.__POWERCLICK_WIN then pcall(function() _G.__POWERCLICK_WIN:Destroy() end) 
 UI.config("powerclick", CONFIG)
 
 local win = UI.Window({
-	title = "POWER", accentTitle = "CLICK", subtitle = "seltonmt",
+	title = "POWER", accentTitle = "CLICK", subtitle = "XYUREI TEAM",
 	badge = "⚔", width = 920, height = 580,
 })
 _G.__POWERCLICK_WIN = win

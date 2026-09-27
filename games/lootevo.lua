@@ -1631,7 +1631,7 @@ local win = UI.Window({
 	name = "LootEvo",
 	title = "LOOT",
 	accentTitle = "EVO",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 	badge = "◈",
 	width = 900,
 	height = 570,
@@ -1998,4 +1998,4 @@ task.spawn(function()
 		redeemCodes()
 	end
 end)
-print("[lootevo] by seltonmt - running (gen " .. generation .. ") - RightShift toggles the UI")
+print("[lootevo] by XYUREI TEAM - running (gen " .. generation .. ") - RightShift toggles the UI")

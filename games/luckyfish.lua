@@ -957,7 +957,7 @@ if UI.sweep then UI.sweep("LUCKYFISH_PANEL") end
 UI.config("luckyfish", CONFIG)
 
 local win = UI.Window({
-    title = "LUCKY", accentTitle = "FISH", subtitle = "seltonmt",
+    title = "LUCKY", accentTitle = "FISH", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "LUCKYFISH_PANEL",
 })
 _G.__LUCKYFISH_WIN = win

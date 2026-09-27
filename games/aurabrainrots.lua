@@ -1007,7 +1007,7 @@ if UI.sweep then UI.sweep("AURABR_PANEL") end
 UI.config("aurabrainrots", CONFIG)
 
 local win = UI.Window({
-    title = "AURA", accentTitle = "BRAINROTS", subtitle = "seltonmt",
+    title = "AURA", accentTitle = "BRAINROTS", subtitle = "XYUREI TEAM",
     badge = "*", width = 820, height = 582, name = "AURABR_PANEL",
 })
 _G.__AURABR_WIN = win

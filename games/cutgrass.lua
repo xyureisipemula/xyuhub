@@ -1476,7 +1476,7 @@ if CONFIG.trainSecs == 20 then CONFIG.trainSecs = 8 end
 
 local win = UI.Window({
 	name = "CutGrassPanel",
-	title = "CUT", accentTitle = "GRASS", subtitle = "seltonmt",
+	title = "CUT", accentTitle = "GRASS", subtitle = "XYUREI TEAM",
 	badge = "🌿", width = 820, height = 582,
 })
 _G.__CUTGRASS_WIN = win

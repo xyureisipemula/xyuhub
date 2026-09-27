@@ -1609,7 +1609,7 @@ local win = UI.Window({
 	name = "ChopTreesPanel",
 	title = "CHOP",
 	accentTitle = "TREES",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 })
 
 local function short(n)

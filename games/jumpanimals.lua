@@ -890,7 +890,7 @@ if UI.sweep then UI.sweep("JUMPANIMALS_PANEL") end
 UI.config("jumpanimals", CONFIG)
 
 local win = UI.Window({
-    title = "JUMP", accentTitle = "FOR ANIMALS", subtitle = "seltonmt",
+    title = "JUMP", accentTitle = "FOR ANIMALS", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "JUMPANIMALS_PANEL",
 })
 _G.__JUMPANIMALS_WIN = win

@@ -847,7 +847,7 @@ if _G.__P2R_WIN then pcall(function() _G.__P2R_WIN:Destroy() end) end
 UI.config("poortorich", CONFIG)
 
 local win = UI.Window({
-	title = "POOR", accentTitle = "TO RICH", subtitle = "seltonmt",
+	title = "POOR", accentTitle = "TO RICH", subtitle = "XYUREI TEAM",
 	badge = "💰", width = 820, height = 582,
 })
 _G.__P2R_WIN = win

@@ -1518,7 +1518,7 @@ if UI.sweep then UI.sweep("BREAKEGG_PANEL") end
 UI.config("breakegg", CONFIG)
 
 local win = UI.Window({
-    title = "BREAK", accentTitle = "AN EGG", subtitle = "seltonmt",
+    title = "BREAK", accentTitle = "AN EGG", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "BREAKEGG_PANEL",
 })
 _G.__BREAKEGG_WIN = win

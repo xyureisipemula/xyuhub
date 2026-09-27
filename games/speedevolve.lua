@@ -566,7 +566,7 @@ local function tryWorld()
 					_G.__SEL_TP = "speedevolve"
 					pcall(function() getgenv().__SEL_TP = "speedevolve" end)
 					pcall(function() writefile("XYUREI X-FLOID-queue.txt", "speedevolve") end)
-					loadstring(game:HttpGet("https://raw.githubusercontent.com/seltonmt012/sel01-rbx/main/loader.lua"))()
+					loadstring(game:HttpGet("https://raw.githubusercontent.com/XYUREI TEAM012/XYUREI X-FLOID-rbx/main/loader.lua"))()
 				end)
 			]])
 		end)
@@ -705,7 +705,7 @@ if _G.__SPEEDEVO_WIN then pcall(function() _G.__SPEEDEVO_WIN:Destroy() end) end
 UI.config("speedevolve", CONFIG)
 
 local win = UI.Window({
-	title = "SPEED", accentTitle = "EVOLVE", subtitle = "seltonmt",
+	title = "SPEED", accentTitle = "EVOLVE", subtitle = "XYUREI TEAM",
 	badge = "🦊", width = 920, height = 580,
 })
 _G.__SPEEDEVO_WIN = win

@@ -1138,7 +1138,7 @@ UI.config("looksclick", CONFIG)
 
 local win = UI.Window({
 	name = "LooksClickPanel",
-	title = "LOOKS", accentTitle = "CLICK", subtitle = "seltonmt",
+	title = "LOOKS", accentTitle = "CLICK", subtitle = "XYUREI TEAM",
 	badge = "🌎", width = 920, height = 580,
 })
 _G.__LOOKSCLICK_WIN = win

@@ -1138,7 +1138,7 @@ if UI.sweep then UI.sweep("LOGOBR_PANEL") end
 UI.config("logobrainrots", CONFIG)
 
 local win = UI.Window({
-    title = "LOGO", accentTitle = "BRAINROTS", subtitle = "seltonmt",
+    title = "LOGO", accentTitle = "BRAINROTS", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "LOGOBR_PANEL",
 })
 _G.__LOGOBR_WIN = win

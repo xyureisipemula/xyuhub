@@ -1023,7 +1023,7 @@ if UI.sweep then pcall(UI.sweep, "SLASHCLICK") end
 UI.config("slashclick", CONFIG)
 
 local win = UI.Window({
-    title = "SLASH", accentTitle = "CLICK", subtitle = "seltonmt",
+    title = "SLASH", accentTitle = "CLICK", subtitle = "XYUREI TEAM",
 })
 _G.__SLASHCLICK_WIN = win
 

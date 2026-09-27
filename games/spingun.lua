@@ -1780,7 +1780,7 @@ if UI.sweep then UI.sweep("SPINGUN_PANEL") end
 UI.config("spingun", CONFIG)
 
 local win = UI.Window({
-    title = "SPIN", accentTitle = "A GUN", subtitle = "seltonmt",
+    title = "SPIN", accentTitle = "A GUN", subtitle = "XYUREI TEAM",
     badge = "*", width = 820, height = 582, name = "SPINGUN_PANEL",
 })
 _G.__SPINGUN_WIN = win

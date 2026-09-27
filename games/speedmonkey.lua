@@ -771,7 +771,7 @@ if _G.__MONKEY_WIN then pcall(function() _G.__MONKEY_WIN:Destroy() end) end
 UI.config("speedmonkey", CONFIG)
 
 local win = UI.Window({
-	title = "SPEED", accentTitle = "MONKEY", subtitle = "seltonmt",
+	title = "SPEED", accentTitle = "MONKEY", subtitle = "XYUREI TEAM",
 	badge = "🐒", width = 920, height = 580,
 })
 _G.__MONKEY_WIN = win

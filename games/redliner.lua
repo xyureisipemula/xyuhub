@@ -1,5 +1,5 @@
 --!nocheck
--- REDLINER  -  seltonmt / XYUREI X-FLOID
+-- REDLINER  -  XYUREI TEAM / XYUREI X-FLOID
 --
 -- A movement shooter that is half swordfight: melee, gun, grapple, dash, slide,
 -- wallrun, and a PARRY that stops bullets as well as blades. Three places, all
@@ -1696,7 +1696,7 @@ local PANEL_NAME = "RedlinerPanel"
 if UI.sweep then pcall(UI.sweep, PANEL_NAME) end
 
 local win = UI.Window({ name = PANEL_NAME, title = "RED", accentTitle = "LINER",
-    subtitle = "seltonmt" })
+    subtitle = "XYUREI TEAM" })
 
 local recording = nil
 

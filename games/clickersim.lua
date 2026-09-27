@@ -1185,7 +1185,7 @@ if UI.sweep then pcall(function() UI.sweep("CLICKSIM") end) end
 UI.config("clickersim", CONFIG)
 
 local win = UI.Window({
-    title = "CLICKER", accentTitle = "SIM", subtitle = "seltonmt",
+    title = "CLICKER", accentTitle = "SIM", subtitle = "XYUREI TEAM",
     name = "XYUREI X-FLOID_clickersim",
 })
 _G.__CLICKSIM_WIN = win

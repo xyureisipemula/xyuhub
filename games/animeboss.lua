@@ -2027,7 +2027,7 @@ if UI.sweep then UI.sweep("ANIMEBOSS_PANEL") end
 UI.config("animeboss", CONFIG)
 
 local win = UI.Window({
-    title = "ANIME", accentTitle = "BOSS", subtitle = "seltonmt",
+    title = "ANIME", accentTitle = "BOSS", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "ANIMEBOSS_PANEL",
 })
 _G.__ANIMEBOSS_WIN = win

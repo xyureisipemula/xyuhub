@@ -1454,7 +1454,7 @@ UI.config("wingsbrainrots", CONFIG)
 
 local win = UI.Window({
 	name = PANEL_NAME,
-	title = "WINGS", accentTitle = "BRAINROTS", subtitle = "seltonmt",
+	title = "WINGS", accentTitle = "BRAINROTS", subtitle = "XYUREI TEAM",
 	badge = "🦅", width = 920, height = 580,
 })
 _G.__WINGSBR_WIN = win

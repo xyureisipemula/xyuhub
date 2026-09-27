@@ -755,7 +755,7 @@ if _G.__SPINJITSU_WIN then pcall(function() _G.__SPINJITSU_WIN:Destroy() end) en
 UI.config("spinjitsu", CONFIG)
 
 local win = UI.Window({
-    title = "SPIN", accentTitle = "JITSU", subtitle = "seltonmt",
+    title = "SPIN", accentTitle = "JITSU", subtitle = "XYUREI TEAM",
     badge = "\226\154\161", width = 920, height = 580,
 })
 _G.__SPINJITSU_WIN = win

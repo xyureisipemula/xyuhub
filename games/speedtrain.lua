@@ -847,7 +847,7 @@ if _G.__SPEEDTRAIN_WIN then pcall(function() _G.__SPEEDTRAIN_WIN:Destroy() end) 
 UI.config("speedtrain", CONFIG)
 
 local win = UI.Window({
-    title = "SPEED", accentTitle = "TRAINING", subtitle = "seltonmt",
+    title = "SPEED", accentTitle = "TRAINING", subtitle = "XYUREI TEAM",
     width = 820, height = 582,
 })
 _G.__SPEEDTRAIN_WIN = win

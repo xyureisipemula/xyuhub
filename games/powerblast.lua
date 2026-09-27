@@ -885,7 +885,7 @@ if UI.sweep then UI.sweep("POWERBLAST_PANEL") end
 UI.config("powerblast", CONFIG)
 
 local win = UI.Window({
-    title = "POWER", accentTitle = "BLAST", subtitle = "seltonmt",
+    title = "POWER", accentTitle = "BLAST", subtitle = "XYUREI TEAM",
     badge = "*", width = 920, height = 580, name = "POWERBLAST_PANEL",
 })
 _G.__POWERBLAST_WIN = win

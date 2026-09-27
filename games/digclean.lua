@@ -1720,7 +1720,7 @@ UI.config("digclean", CONFIG)
 if CONFIG.swapMargin == 1.2 then CONFIG.swapMargin = 1.05 end
 
 local win = UI.Window({
-	title = "DIG", accentTitle = "CLEAN", subtitle = "seltonmt",
+	title = "DIG", accentTitle = "CLEAN", subtitle = "XYUREI TEAM",
 	badge = "🧼", width = 920, height = 580,
 })
 _G.__DIGCLEAN_WIN = win

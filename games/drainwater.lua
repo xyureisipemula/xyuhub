@@ -1128,7 +1128,7 @@ if _G.__DRAINWATER_WIN then pcall(function() _G.__DRAINWATER_WIN:Destroy() end) 
 UI.config("drainwater", CONFIG)
 
 local win = UI.Window({
-	title = "DRAIN", accentTitle = "WATER", subtitle = "seltonmt",
+	title = "DRAIN", accentTitle = "WATER", subtitle = "XYUREI TEAM",
 	badge = "💧", width = 920, height = 580,
 })
 _G.__DRAINWATER_WIN = win

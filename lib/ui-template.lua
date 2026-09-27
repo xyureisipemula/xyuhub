@@ -2,7 +2,7 @@
 -- ui-template.lua  --  the XYUREI X-FLOID panel, v3
 --
 --   local UI   = loadstring(readfile("ui-template.lua"))()
---   local win  = UI.Window({ title = "SPEED", accentTitle = "MONKEY", subtitle = "seltonmt" })
+--   local win  = UI.Window({ title = "SPEED", accentTitle = "MONKEY", subtitle = "XYUREI TEAM" })
 --   local page = win:Page("FARM", UI.icon.bolt)
 --   local card = page:Card("LOOP", 1)      -- 1 = left, 2 = right, 0 = full width
 --   card:Toggle("Auto", CONFIG.auto, function(v) CONFIG.auto = v end, "hint")
@@ -99,7 +99,7 @@ local UI = {}
 UI.VERSION = "3.15"
 UI.BRAND = "XYUREI X-FLOID"
 UI.DISCORD = "discord.gg/ARdpzFuKMm"
-UI.REPO = "seltonmt012/sel01-rbx"
+UI.REPO = "XYUREI TEAM012/XYUREI X-FLOID-rbx"
 
 -- Every script sweeps its own leftover panel before rebuilding, and every one of
 -- them used to spell the container list out as a literal:
@@ -306,7 +306,7 @@ end
 --   local id = UI.imageFromUrl("https://raw.githubusercontent.com/.../swords.png")
 --   if id then someImageLabel.Image = id end
 --
--- The practical use: put a PNG in the sel01-rbx repo next to the scripts, and
+-- The practical use: put a PNG in the XYUREI X-FLOID-rbx repo next to the scripts, and
 -- every panel can draw it without anybody uploading anything to Roblox.
 function UI.imageFromUrl(url, name)
 	name = name or ("XYUREI X-FLOID-cache/" .. (string.match(url, "([%w%-_%.]+)%.png$") or

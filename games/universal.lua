@@ -1240,7 +1240,7 @@ end)
 
 local win = UI.Window({
 	name = "XYUREI X-FLOIDUniversalPanel",
-	title = "XYUREI X-FLOID", accentTitle = "UNIVERSAL", subtitle = "seltonmt",
+	title = "XYUREI X-FLOID", accentTitle = "UNIVERSAL", subtitle = "XYUREI TEAM",
 })
 _G.__SELUNI_WIN = win
 

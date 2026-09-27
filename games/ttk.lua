@@ -3045,7 +3045,7 @@ UI.config("ttk", CONFIG)
 
 local win = UI.Window({
 	name = "TTKPanel",
-	title = "TTK", accentTitle = "TESTING", subtitle = "seltonmt",
+	title = "TTK", accentTitle = "TESTING", subtitle = "XYUREI TEAM",
 	badge = "◎", width = 820, height = 582,
 })
 _G.__TTK_WIN = win

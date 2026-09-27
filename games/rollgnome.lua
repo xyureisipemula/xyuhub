@@ -1712,7 +1712,7 @@ if UI.sweep then UI.sweep("ROLLGNOME") end
 UI.config("rollgnome", CONFIG)
 
 local win = UI.Window({
-    title = "ROLL A", accentTitle = "GNOME", subtitle = "seltonmt",
+    title = "ROLL A", accentTitle = "GNOME", subtitle = "XYUREI TEAM",
     name = "ROLLGNOME", badge = "\240\159\143\161", width = 820, height = 582,
 })
 _G.__ROLLGNOME_WIN = win

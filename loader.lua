@@ -1,9 +1,9 @@
 --!nocheck
--- sel01 hub loader - by seltonmt
+-- XYUREI X-FLOID hub loader - by XYUREI TEAM
 --
 -- One line in the executor, every game after that is automatic:
 --
---   loadstring(game:HttpGet("https://raw.githubusercontent.com/seltonmt012/sel01-rbx/main/loader.lua"))()
+--   loadstring(game:HttpGet("https://raw.githubusercontent.com/XYUREI TEAM012/XYUREI X-FLOID-rbx/main/loader.lua"))()
 --
 -- What it does, in order:
 --
@@ -20,7 +20,7 @@
 --      running, and only in a place that BELONGS to that script. See AUTO-START
 --      below.
 --
--- Everything it downloads is cached under the executor workspace in sel01/, and
+-- Everything it downloads is cached under the executor workspace in XYUREI X-FLOID/, and
 -- a failed HttpGet falls back to that cache instead of leaving you with nothing.
 --
 -- Nothing matched? A small panel lists every game in the registry and lets you
@@ -48,8 +48,8 @@ do
     end
 end
 
-local BASE = "https://raw.githubusercontent.com/seltonmt012/sel01-rbx/main/"
-local CACHE = "sel01/"
+local BASE = "https://raw.githubusercontent.com/XYUREI TEAM012/XYUREI X-FLOID-rbx/main/"
+local CACHE = "XYUREI X-FLOID/"
 
 -- AUTO-START --------------------------------------------------------------
 --
@@ -187,10 +187,10 @@ local VIA_QUEUE = FROM ~= nil
 clearQueueMarker()
 
 local function notify(text, duration)
-    print("[sel01] " .. text)
+    print("[XYUREI X-FLOID] " .. text)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
-            Title = "sel01", Text = text, Duration = duration or 4,
+            Title = "XYUREI X-FLOID", Text = text, Duration = duration or 4,
         })
     end)
 end
@@ -674,7 +674,7 @@ local function loadGame(entry, why)
     local chunk, err = run(body, entry.file)
     if not chunk then
         notify("syntax error in " .. entry.file .. ": " .. tostring(err), 10)
-        warn("[sel01] " .. tostring(err))
+        warn("[XYUREI X-FLOID] " .. tostring(err))
         return false
     end
 
@@ -682,7 +682,7 @@ local function loadGame(entry, why)
     local ok, runErr = pcall(chunk)
     if not ok then
         notify("crashed: " .. tostring(runErr), 10)
-        warn("[sel01] " .. tostring(runErr))
+        warn("[XYUREI X-FLOID] " .. tostring(runErr))
         return false
     end
     return true
@@ -696,7 +696,7 @@ end
 -- so there is exactly one look in the whole hub.
 local function textPicker()
     notify("no script for place " .. game.PlaceId .. " - pick one manually", 10)
-    print("[sel01] _G.__SEL.load(\"alias\"):")
+    print("[XYUREI X-FLOID] _G.__SEL.load(\"alias\"):")
     for _, entry in ipairs(INDEX.games) do
         print(string.format("  %-14s %s", entry.alias or "?", entry.name or ""))
     end
@@ -708,7 +708,7 @@ local function buildPicker()
     if _G.__SEL.pickerWindow then pcall(function() _G.__SEL.pickerWindow:Destroy() end) end
 
     local win = U.Window({
-        title = "SEL", accentTitle = "01", subtitle = "seltonmt",
+        title = "SEL", accentTitle = "01", subtitle = "XYUREI TEAM",
         badge = "☰", width = 760, height = 520,
     })
     local page = win:Page("HUB", U.icon and U.icon.list or nil)
@@ -741,7 +741,7 @@ end
 local function picker()
     local ok, built = pcall(buildPicker)
     if not ok or not built then textPicker() end
-    if not ok then warn("[sel01] picker: " .. tostring(built)) end
+    if not ok then warn("[XYUREI X-FLOID] picker: " .. tostring(built)) end
 end
 
 --------------------------------------------------------------------------------
@@ -833,9 +833,9 @@ if not mayStart() then
     -- who wants the script here runs the loader line, which always works; the
     -- print is for anyone wondering where the panel went.
     local what = entry and (entry.name or entry.alias) or "no script"
-    print("[sel01] auto-start is off - " .. tostring(what) .. " not started.")
-    print("[sel01] run the loader line to start it here, or turn auto-start on:")
-    print("[sel01]   _G.__SEL.setAutoStart(true)   (or the switch behind the mark in the panel)")
+    print("[XYUREI X-FLOID] auto-start is off - " .. tostring(what) .. " not started.")
+    print("[XYUREI X-FLOID] run the loader line to start it here, or turn auto-start on:")
+    print("[XYUREI X-FLOID]   _G.__SEL.setAutoStart(true)   (or the switch behind the mark in the panel)")
 elseif entry then
     loadGame(entry, why)
 else

@@ -795,7 +795,7 @@ if UI.sweep then UI.sweep("MINEMOUNTAIN") end
 UI.config("minemountain", CONFIG)
 
 local win = UI.Window({
-    title = "MINE A", accentTitle = "MOUNTAIN", subtitle = "seltonmt",
+    title = "MINE A", accentTitle = "MOUNTAIN", subtitle = "XYUREI TEAM",
     badge = "\226\155\176", width = 920, height = 580,
 })
 _G.__MINEMTN_WIN = win

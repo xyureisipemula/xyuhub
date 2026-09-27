@@ -750,7 +750,7 @@ UI.config("trainclimb", CONFIG)
 
 local win = UI.Window({
 	name = "TrainClimbPanel",
-	title = "TRAIN", accentTitle = "CLIMB", subtitle = "seltonmt",
+	title = "TRAIN", accentTitle = "CLIMB", subtitle = "XYUREI TEAM",
 	badge = "💪", width = 820, height = 582,
 })
 _G.__TRAINCLIMB_WIN = win

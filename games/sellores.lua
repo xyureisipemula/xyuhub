@@ -1,5 +1,5 @@
 --!nocheck
--- [💎] Sell Ores ⛏️ - by seltonmt
+-- [💎] Sell Ores ⛏️ - by XYUREI TEAM
 --
 -- Place 122572082932179. Loop: pull the roller lever, buy the rolled ore onto a
 -- pedestal, let the drills fill a crate, pick the crate up, sell it, spend the
@@ -2381,7 +2381,7 @@ local win = UI.Window({
 	name = "SellOres",
 	title = "SELL",
 	accentTitle = "ORES",
-	subtitle = "seltonmt",
+	subtitle = "XYUREI TEAM",
 	badge = "⛏",
 	width = 920,
 	height = 580,
@@ -2664,4 +2664,4 @@ end)
 
 findBase()
 refreshMoney()
-print("[sellores] by seltonmt - running (gen " .. generation .. ") - RightShift toggles the UI")
+print("[sellores] by XYUREI TEAM - running (gen " .. generation .. ") - RightShift toggles the UI")

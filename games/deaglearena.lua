@@ -2732,7 +2732,7 @@ UI.config("deaglearena", CONFIG)
 
 local win = UI.Window({
 	name = "DeagleArenaPanel",
-	title = "DEAGLE", accentTitle = "ARENA", subtitle = "seltonmt",
+	title = "DEAGLE", accentTitle = "ARENA", subtitle = "XYUREI TEAM",
 	badge = "◎", width = 820, height = 582,
 })
 _G.__DEAGLE_WIN = win

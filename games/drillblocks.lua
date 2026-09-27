@@ -1,5 +1,5 @@
 --!nocheck
--- [Drill Blocks for Brainrots] - brainrot hunter, by seltonmt
+-- [Drill Blocks for Brainrots] - brainrot hunter, by XYUREI TEAM
 --
 -- Place 78177131121429. What the game does: drill blocks, brainrots drop into
 -- workspace.Items, you carry one to your base, drop it on a slot, and it pays
@@ -1113,7 +1113,7 @@ if (CONFIG.upgradeEvery or 0) < 1 then CONFIG.upgradeEvery = 1 end   -- old 0.2 
 
 local win = UI.Window({
 	name = "DRILLBLOCKS",
-	title = "DRILL", accentTitle = "BLOCKS", subtitle = "seltonmt",
+	title = "DRILL", accentTitle = "BLOCKS", subtitle = "XYUREI TEAM",
 	width = 820, height = 582,
 })
 _G.__DRILL_WIN = win
@@ -1253,4 +1253,4 @@ _G.__DRILL_DBG = {
 	occupiedSlots = occupiedSlots, slotIncome = slotIncome, parseMoney = parseMoney,
 }
 
-print("[drillblocks] by seltonmt - running (gen " .. generation .. ") - RightShift toggles the UI")
+print("[drillblocks] by XYUREI TEAM - running (gen " .. generation .. ") - RightShift toggles the UI")
