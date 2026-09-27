@@ -98,7 +98,7 @@ local UI = {}
 -- 3.15: the report card's category, confirmation popup and validation strings.
 UI.VERSION = "3.15"
 UI.BRAND = "XYUREI X-FLOID"
-UI.DISCORD = "discord.gg/ARdpzFuKMm"
+UI.DISCORD = "https://xyurei-huh.vercel.app"
 UI.REPO = "XYUREI TEAM012/XYUREI X-FLOID-rbx"
 
 -- Every script sweeps its own leftover panel before rebuilding, and every one of
@@ -179,7 +179,7 @@ end
 -- it turns the open letterbox into a form: it accepts a fixed set of fields,
 -- writes the Discord message itself, rate-limits per IP, and can be changed in
 -- one place in seconds without touching a single script.
-UI.REPORT_URL = "https://XYUREI X-FLOID-report.XYUREI X-FLOID.workers.dev"
+UI.REPORT_URL = "https://xyurei-huh.vercel.app"
 
 -- Palette ---------------------------------------------------------------------
 -- Four depths, not five. v2 had void/rail/sidebar/window/header/subBar/card and

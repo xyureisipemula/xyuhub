@@ -3,7 +3,7 @@
 --
 -- One line in the executor, every game after that is automatic:
 --
---   loadstring(game:HttpGet("https://raw.githubusercontent.com/XYUREI TEAM012/XYUREI X-FLOID-rbx/main/loader.lua"))()
+--   loadstring(game:HttpGet("https://raw.githubusercontent.com/xyureisipemula/xyuhub/main/loader.lua"))()
 --
 -- What it does, in order:
 --
@@ -48,7 +48,7 @@ do
     end
 end
 
-local BASE = "https://raw.githubusercontent.com/XYUREI TEAM012/XYUREI X-FLOID-rbx/main/"
+local BASE = "https://raw.githubusercontent.com/xyureisipemula/xyuhub/main/"
 local CACHE = "XYUREI X-FLOID/"
 
 -- AUTO-START --------------------------------------------------------------
@@ -542,7 +542,7 @@ local function keyPanel(entry, reason)
 
     local win = U.Window({
         name = "XYUREI X-FLOIDKeyPanel",
-        title = "SE", accentTitle = "LUX", subtitle = "key",
+        title = "XYUREI", accentTitle = "X-FLOID", subtitle = "key",
         badge = "🔑", width = 820, height = 582,
     })
     keyWindow = win
@@ -708,7 +708,7 @@ local function buildPicker()
     if _G.__SEL.pickerWindow then pcall(function() _G.__SEL.pickerWindow:Destroy() end) end
 
     local win = U.Window({
-        title = "SEL", accentTitle = "01", subtitle = "XYUREI TEAM",
+        title = "XYUREI", accentTitle = "X-FLOID", subtitle = "XYUREI TEAM",
         badge = "☰", width = 760, height = 520,
     })
     local page = win:Page("HUB", U.icon and U.icon.list or nil)
